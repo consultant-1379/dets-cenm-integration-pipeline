@@ -1,0 +1,12 @@
+ENVIRONMENT_TYPE=kaas
+KUBE_CRED=hoff021.conf
+NAMESPACE=enm1
+RWX_STORAGE_CLASS=nfs
+STORAGE_CLASS=network-block
+TIME_ZONE=UTC
+ENM_LAUNCHER_HOSTNAME=enm1.hoff021.rnd.gic.ericsson.se
+HOST_SYSTEM_IDENTIFIER=enm1.hoff021
+LB_EXTERNAL_PORT=10.210.153.5
+COM_INF_LDAP_ROOT_SUFFIX=dc=enm1,dc=com
+COM_INF_LDAP_ADMIN_CN=uid=ssouser,ou=people,dc=enm1,dc=com
+EMAIL_LIST=EricssonHyderabad.ENMMisty@tcs.com;EricssonHyderabad.ENMDewdrops@tcs.com

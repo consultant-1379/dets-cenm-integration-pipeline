@@ -1,0 +1,12 @@
+ENVIRONMENT_TYPE=kaas
+KUBE_CRED=hoff080.conf
+NAMESPACE=enm45
+RWX_STORAGE_CLASS=nfs
+STORAGE_CLASS=network-block
+TIME_ZONE=UTC
+ENM_LAUNCHER_HOSTNAME=enm45.hoff080.rnd.gic.ericsson.se
+HOST_SYSTEM_IDENTIFIER=enm45.hoff080
+LB_EXTERNAL_PORT=10.120.216.245
+COM_INF_LDAP_ROOT_SUFFIX=dc=enm45,dc=com
+COM_INF_LDAP_ADMIN_CN=uid=ssouser,ou=people,dc=enm45,dc=com
+EMAIL_LIST=PDLDESPICA@pdl.internal.ericsson.com

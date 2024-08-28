@@ -1,0 +1,114 @@
+def commonMethods
+
+pipeline{
+    agent {
+            node
+            {
+               label slave
+            }
+        }
+    environment {
+            HOME_DIR = "${WORKSPACE}"
+            cenm_utilities_docker_image = "armdocker.rnd.ericsson.se/proj-enm/cenm-build-utilities:latest"
+            nexus_repositoryUrl = "https://arm902-eiffel004.athtem.eei.ericsson.se:8443/nexus/content/repositories/releases/"
+            helm_repository_release = "https://arm.seli.gic.ericsson.se/artifactory/proj-enm-helm/"
+            helm_repository_ci_internal = "https://arm.seli.gic.ericsson.se/artifactory/proj-enm-dev-internal-helm/"
+            csar_package_name = "enm-installation-package"
+            Client_HOME ="/home/cenmbuild"
+    }
+    stages{
+        stage('Clean Up WorkSpace'){
+                steps{
+                        deleteDir()
+                     }
+        }
+        stage('Checkout Integration Pipeline Git Repository') {
+            steps {
+                git branch: 'master',
+                        url: '${GERRIT_MIRROR}/OSS/com.ericsson.oss.containerisation/eric-enm-integration-pipeline-code'
+                sh '''
+                    git remote set-url origin --push ${GERRIT_CENTRAL}/OSS/com.ericsson.oss.containerisation//eric-enm-integration-pipeline-code
+                '''
+            }
+        }
+        stage('Load common methods') {
+            steps {
+                script {
+                    commonMethods = load("${env.WORKSPACE}/Jenkins/JobDSL/CommonMethods.groovy")
+                }
+            }
+        }
+        stage('Delete docker image') {
+            steps {
+                script {
+                    commonMethods.delete_build_utilities_image()
+                }
+            }
+        }
+        stage('Pull docker image') {
+            steps {
+                script {
+                    sh "docker pull ${cenm_utilities_docker_image}"
+                }
+            }
+        }
+        stage( 'Pre Configurations' ) {
+            steps {
+                script{
+                      commonMethods.extract_jq()
+                      commonMethods.download_kube_config_file_from_dit()
+                      commonMethods.read_site_config_info_from_dit()
+                      commonMethods.set_kube_config_file()
+                      commonMethods.get_cn_build_version_info()
+               }
+          }
+        }
+        stage('Backuprestore configuration'){
+            steps {
+                script{
+                    commonMethods.brocli_configuration()
+                                }
+                         }
+                }
+        stage('Backup with scope') {
+                steps {
+                    script{
+                           sh "${brocli} status"
+                           if(backup_scope.equals("ROLLBACK")){
+                               commonMethods.backup_rollback()
+                               sh "${brocli} list"
+                           }
+                           else{
+                               commonMethods.backup_restore()
+                               commonMethods.creation_folder_in_sftp_server()
+                               commonMethods.export_backup()
+                               sh "${brocli} list"
+                            }
+                        }
+                    }
+                }
+            }
+
+    post{
+        failure {
+            script{
+                echo "Failure"
+            }
+        }
+        aborted{
+            script{
+                echo "Aborted"
+            }
+        }
+        success{
+            script{
+                echo "Success"
+            }
+        }
+        always {
+            script{
+                currentBuild.displayName = "Backup with ${deployment_mechanism} on: ${environment_name} by ${backup_scope}"
+            }
+        }
+    }
+}

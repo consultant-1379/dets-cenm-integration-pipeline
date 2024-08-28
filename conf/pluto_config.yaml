@@ -1,0 +1,25 @@
+Pluto:
+        Product: 'test' # Name of your Product
+        Charts:
+            Scan: True
+            chartsDir: #Mount these dir to /tmp/src
+             - "eric-enm-bro-integration"
+             - "eric-enm-pre-deploy-integration"
+             - "eric-enm-monitoring-integration"
+             - "eric-enm-infra-integration"
+             - "eric-enm-stateless-integration"
+            armLinks:
+                Links:
+            armLinksWithAuth:
+                Links:
+            ReportFormat: owide #ojson, owide, oyaml #default is owide
+            TargetVersions: ReplaceTarget #Optional #v1.22.0  #You can target the version you are concerned with , and the version must begin with a v, shows all dep apis below this
+            OnlyRemoved: False #Make it true if you only want to see apiVersions that have been removed rather than both deprecated and removed
+        Cluster:
+            Scan: False
+            KubeconfigFile: "config" #mount this to /opt/pluto/conf dir
+            ReportFormat: oyaml #ojson, owide, oyaml #default is owide
+            Namespace: "" #Optional, Default to scan all NS
+            TargetVersions: 'v1.22.0' #Optional #v1.22.0  #You can target the version you are concerned with , and the version must begin with a v, shows all dep apis below this
+            OnlyRemoved: False #Make it true if you only want to see apiVersions that have been removed rather than both deprecated and removed, Else leave it 'False'
+

@@ -1,0 +1,351 @@
+#!/usr/bin/env groovy
+
+/* In order to make this pipeline work, the following configuration on Jenkins is required:
+ * - slave with a specific label (see pipeline.agent.label below)
+ * - credentials plugin should be installed and have the secrets with the following names:
+ * - Monitoring Upgrade jenkins file upgrades the existing Monitoring II with latest charts:
+ */
+
+
+/*
+ * This function will captures the report of the deployment and sends the report through mail
+ */
+
+def emailReport(content){
+
+    def subject = "${env.JOB_NAME} - Build #${env.BUILD_NUMBER} - ${currentBuild.currentResult}!"
+
+    try {
+        emailext(body: content, mimeType: 'text/html', from: 'jenkins_monitoring@ericsson.com',
+            subject: subject,
+            to: "${EMAIL_LIST}" )
+    } catch( err ){
+        echo "$err"
+    }
+}
+
+/*
+ * This function will generates report of the deployment.
+ */
+
+def reportHeading(status){
+
+    def deployResult
+    def color
+    def investigation
+
+    if(status == 'Success'){
+        deployResult = "Success"
+        color = "#9ACD32"
+        investigation = "NA"
+    } else if(status == 'Failed'){
+        deployResult = "Failed"
+        color = "#DC143C"
+        investigation = "In progress, will be included in a follow up email"
+    } else if(status == 'Aborted'){
+        deployResult = "Aborted"
+        color = "#95A5A6"
+        investigation = "(If applicable), will be included in a follow up email"
+    }
+
+    def report = "Hi All,\n\n <h2>${NAMESPACE} Deployment Result: <span style=\"background-color:${color};\">${status}</span></h2>"
+    def MonitoringchartVersion = sh (script : "${helm} list -n ${NAMESPACE} | grep  eric-enm-monitoring-integration-${NAMESPACE} | awk \'{print \$(NF-1)}\'", returnStdout: true)
+    report += "<li><strong>Monitoring Chart version :</strong> ${MonitoringchartVersion}</li>"
+    report += "<li><strong>Please find the Phase 1 Deploy Job Details:</strong>  <a href=${BUILD_URL}>${BUILD_URL}</a></li>"
+    report += "<li><strong>Investigation Results  :  ${investigation}</strong></li></ul>"
+    report = report.replace("\n","</br>")
+    return report
+}
+
+/*
+ * This function will print the list of unstable pods after Upgrade
+ */
+
+def printPods(){
+    def RestartPods = sh (script : "\${kubectl} -n \${NAMESPACE} get pods --sort-by=\'.status.containerStatuses[0].restartCount\' --no-headers|egrep 'prometheus|remotewriter|monitoring'| awk \'\$4>0 {print \$0}\'", returnStdout: true)
+    def failedState = sh (script : "${kubectl} -n ${NAMESPACE} get pods | egrep \'NAME|Running\' | egrep \'0/|NAME\'" , returnStdout: true)
+    def initState = sh (script : "${kubectl} -n ${NAMESPACE} get pods | grep -v Running |grep -v Completed || true", returnStdout: true)
+    def sidecarhttpd= sh (script : "${kubectl} -n ${NAMESPACE} get pods | egrep \'NAME|Running\' | egrep \'1/2|NAME\'" , returnStdout: true)
+    def sidecarmonitoring= sh (script : "${kubectl} -n ${NAMESPACE} get pods | egrep \'NAME|Running\' | egrep \'2/3|NAME\'" , returnStdout: true)
+    def report = "<ul><li><strong>Please find the Restart Pods in Deployment:</strong> \n<pre>${RestartPods}</pre> \n\n\n #kubectl -n ${NAMESPACE} get pods | egrep \'NAME|Running\' | egrep \'0/|NAME\' \n<pre>${failedState}</pre> \n\n\n #kubectl -n ${NAMESPACE} get pods | grep -v Running \n<pre>${initState}</pre> \n\n\n #kubectl -n ${NAMESPACE} get pods | egrep \'NAME|Running\' | egrep \'1/2|NAME\' \n<pre>${sidecarhttpd}</pre> \n\n\n #kubectl -n ${NAMESPACE} get pods | egrep \'NAME|Running\' | egrep \'2/3|NAME\' \n<pre>${sidecarmonitoring}</pre>"
+    echo "${report}"
+    report = report.replace("\n","</br>")
+    report += "<style> pre {display: block;font-family: Lucida Console, Monaco, monospace; white-space: pre;} </style>";
+
+    return report
+}
+
+/*
+ * This function is required to check if the integration parameters  exists in integration values.yaml file or not.
+ */
+
+def integration_values_file_keys_exists(element, keys,value){
+     def str = keys.tokenize(".");
+    _element = element
+    _flag = false
+     for (i = 0; i < str.size(); i++) {
+        try{
+           if ( _element!=null&&_element.containsKey(str[i])){
+              _element = _element[str[i]]
+              if(i==str.size()-1){
+                _flag=true
+              }
+           }
+           } catch( err ) {
+              return false
+            }
+        }
+         return  _flag
+}
+
+/*
+ * This function will update value of the key in integration values.yaml file.
+ */
+
+def update_IntegrationValues_with_values(keys,value){
+     def str = keys.tokenize(".");
+     def bindings = [:]
+
+     def map = bindings
+     for (i = 0; i < str.size(); i++) {
+       def part = str[i];
+       if (!map.containsKey(part)) {
+           map[part] = values.get(part)
+       }
+       if (i == str.size() - 1) {
+           map[part] = value
+       } else {
+          map = map[part]
+       }
+     }
+    values.putAll(bindings)
+}
+
+
+/*
+ * This function is required to Update the integration values.yaml file with site-config properties
+ */
+
+def updateIntegrationValues() {
+    try {
+        def integration_value_map = [
+                       'global.persistentVolumeClaim.storageClass':'STORAGE_CLASS',
+                       'global.ingress.enmHost':'ENM_LAUNCHER_HOSTNAME',
+                       'global.rwx.storageClass':'RWX_STORAGE_CLASS',
+                       'global.timezone':'TIME_ZONE',
+                       'prometheus-operator.prometheusOperator.kubeletService.namespace':'NAMESPACE',
+                       'prometheus-operator.kubelet.namespace':'NAMESPACE',
+                       'prometheus-operator.prometheus.prometheusSpec.serviceMonitorNamespaceSelector.matchLabels.name':'NAMESPACE',
+                       'prometheus-operator.prometheus.prometheusSpec.storageSpec.volumeClaimTemplate.spec.storageClassName':'STORAGE_CLASS',
+                       'prometheus-operator.prometheus-node-exporter.service.port':'NODE_EXPORTER_PORT',
+                       'prometheus-operator.prometheus-node-exporter.service.targetPort':'NODE_EXPORTER_PORT',
+                       'eric-enm-monitoring-master.monitoring.autoUpload.ddpsite':'DDPSITE',
+                       'eric-enm-monitoring-master.monitoring.autoUpload.account':'ACCOUNT',
+                       'eric-enm-monitoring-master.monitoring.autoUpload.password':'PASSWORD',
+                       'prometheus-operator.grafana.ingress.hosts' : 'GRAFANA_HOSTS'
+                       ]
+        def list_all_environment = env.getEnvironment()
+        filename = "${HOME_DIR}/eric-enm-monitoring-integration-values-${INTEGRATION_VALUE_VERSION}.yaml"
+        values = readYaml file: filename
+        for (parameter in integration_value_map){
+         def value = parameter.value
+         def key = parameter.key
+         if (integration_values_file_keys_exists( values, key, value)){
+               value= list_all_environment.get(value)
+                      if ( key == 'prometheus-operator.grafana.ingress.hosts' )
+                            {
+                             value=[value]
+                            }
+               update_IntegrationValues_with_values(key,value)
+         }
+       }
+        sh "rm -f ${filename}"
+        writeYaml file: filename, data: values
+    } catch( err ) {
+        echo "$err"
+        sh "exit 1"
+    }
+}
+
+/*
+ * This function is required to download the integration charts and integration values file from CI Internal area which can be used by * both Integration and MT teams.
+ */
+
+def download_charts_ci_internal(){
+  try{
+          sh "curl ${helm_repository_ci_internal}/eric-enm-monitoring-integration/eric-enm-monitoring-integration-${MONITORING_INTEGRATION_CHART_VERSION}.tgz -o eric-enm-monitoring-integration-${MONITORING_INTEGRATION_CHART_VERSION}.tgz"
+          sh "curl ${helm_repository_ci_internal}/eric-enm-integration-values/eric-enm-monitoring-integration-values-${INTEGRATION_VALUE_VERSION}.yaml -o eric-enm-monitoring-integration-values-${INTEGRATION_VALUE_VERSION}.yaml"
+     }catch( err )
+        {
+        echo "$err"
+        sh "exit 1"
+      }
+}
+
+/*
+ * This function is required to download the integration charts and integration values file from drop area which can be used by
+ * both Integration and MT teams.
+ */
+
+def download_charts_release_area(){
+  try{
+          sh "curl ${helm_repository_release}/eric-enm-monitoring-integration/eric-enm-monitoring-integration-${MONITORING_INTEGRATION_CHART_VERSION}.tgz -o eric-enm-monitoring-integration-${MONITORING_INTEGRATION_CHART_VERSION}.tgz"
+          sh "curl ${helm_repository_release}/eric-enm-integration-values/eric-enm-monitoring-integration-values-${INTEGRATION_VALUE_VERSION}.yaml -o eric-enm-monitoring-integration-values-${INTEGRATION_VALUE_VERSION}.yaml"
+     }catch( err ) {
+        echo "$err"
+        sh "exit 1"
+      }
+}
+
+/*
+ * This function is required to get the charts and integration values file from respective folder which will be used in the Upgrade
+ * stage
+ */
+
+
+/*
+ *This function is required to read the values from the Site-Config-File of specified deployment.
+ */
+
+def read_site_config_file(){
+    def site_config_properties = readProperties  (file:"Site-Config-File/${environment_name}")
+    env.KUBE_CRED = site_config_properties['KUBE_CRED']
+    env.NAMESPACE = site_config_properties['NAMESPACE']
+    env.RWX_STORAGE_CLASS =site_config_properties['RWX_STORAGE_CLASS']
+    env.STORAGE_CLASS =site_config_properties['STORAGE_CLASS']
+    env.TIME_ZONE=site_config_properties['TIME_ZONE']
+    env.NODE_EXPORTER_PORT=site_config_properties['NODE_EXPORTER_PORT']
+    env.ENM_LAUNCHER_HOSTNAME=site_config_properties['ENM_LAUNCHER_HOSTNAME']
+    env.DDPSITE = site_config_properties['DDPSITE']
+    env.ACCOUNT = site_config_properties['ACCOUNT']
+    env.PASSWORD = site_config_properties['PASSWORD']
+    env.GRAFANA_HOSTS = site_config_properties['GRAFANA_HOSTS']
+    env.EMAIL_LIST=site_config_properties['EMAIL_LIST']
+    env.kubeConfig = "${workspace}/.kube/${KUBE_CRED}"
+    env.helm = "docker run --rm -v ${kubeConfig}:/root/.kube/config -v ${WORKSPACE}:${WORKSPACE} --workdir ${WORKSPACE} ${cenm_utilities_docker_image} helm3"
+    env.kubectl = "docker run --rm  -v ${kubeConfig}:/root/.kube/config -v ${WORKSPACE}:${WORKSPACE} --workdir ${WORKSPACE} ${cenm_utilities_docker_image} kubectl"
+}
+
+pipeline{
+    agent {
+            node
+            {
+            label SLAVE
+            }
+        }
+    environment {
+        HOME_DIR = "${WORKSPACE}"
+        https_proxy = "http://www-proxy.lmera.ericsson.se:8080/"
+        cenm_utilities_docker_image = "armdocker.rnd.ericsson.se/proj-enm/cenm-build-utilities:latest"
+        helm_repository_release = "https://arm.seli.gic.ericsson.se/artifactory/proj-enm-helm/"
+        helm_repository_ci_internal = "https://arm.seli.gic.ericsson.se/artifactory/proj-enm-dev-internal-helm/"
+    }
+    stages{
+        stage('Clean Up WorkSpace'){
+                steps{
+                        deleteDir()
+                     }
+        }
+        stage('Checkout ENM Integration Pipeline Git Repository') {
+            steps {
+                git branch: 'master',
+                        url: 'ssh://gerrit.ericsson.se:29418/OSS/com.ericsson.oss.containerisation/eric-enm-integration-pipeline-code'
+            }
+        }
+
+        stage( 'Site Config Properties' ) {
+            steps {
+                 script{
+                         read_site_config_file()
+                      }
+              }
+        }
+        stage( 'Pre Configurations' ) {
+            steps {
+                   sh 'mkdir -p ${PWD}/.kube && chmod 775 ${PWD}/.kube && cp -v ${PWD}/Kube-Config-Files/${KUBE_CRED} ${PWD}/.kube/${KUBE_CRED} && chmod 664 ${PWD}/.kube/${KUBE_CRED}'
+
+            }
+        }
+        stage('Download Charts from CI Internal') {
+            when {
+                 allOf {
+                     environment name: 'stage_area', value: 'ci_internal'
+                 }
+            }
+            steps {
+                script {
+                   download_charts_ci_internal()
+                }
+            }
+        }
+        stage('Download Charts from Release area') {
+            when {
+                 allOf {
+                     environment name: 'stage_area', value: 'drop'
+                 }
+            }
+            steps {
+                script {
+                   download_charts_release_area()
+                }
+            }
+        }
+        stage('Updating integration values'){
+            steps{
+                script{
+                    updateIntegrationValues()
+                }
+            }
+        }
+        stage('cENM Upgrade'){
+             stages {
+                   stage('Upgrade cENM Monitoring chart'){
+                    steps{
+                        sh("${helm} upgrade eric-enm-monitoring-integration-${NAMESPACE} --values eric-enm-monitoring-integration-values-${INTEGRATION_VALUE_VERSION}.yaml  eric-enm-monitoring-integration-${MONITORING_INTEGRATION_CHART_VERSION}.tgz -n ${NAMESPACE} --wait --timeout 600s")
+                    }
+                 }
+                }
+        }
+        stage('Generate artifact file'){
+             steps{
+                  script{
+                        sh 'echo "environment_name=${environment_name}" >> artifact.properties'
+                        archiveArtifacts 'artifact.properties'
+                        }
+                  }
+                }
+    }
+    post{
+        failure {
+            script{
+                echo "Failure"
+                def report = reportHeading("Failed")
+                report += printPods()
+                emailReport(report)
+            }
+        }
+        aborted{
+            script{
+                echo "Aborted"
+                def report = reportHeading("Aborted")
+                report += printPods()
+                emailReport(report)
+            }
+        }
+        success{
+            script{
+                echo "Success"
+                def report = reportHeading("Success")
+                report +=printPods()
+                emailReport(report)
+            }
+        }
+        always {
+            script{
+                currentBuild.displayName = "Upgrade on: ${environment_name}"
+                sh("cat ${HOME_DIR}/eric-enm-monitoring-integration-values-${INTEGRATION_VALUE_VERSION}.yaml")
+                archiveArtifacts "eric-enm-monitoring-integration-values-${INTEGRATION_VALUE_VERSION}.yaml"
+            }
+        }
+    }
+}

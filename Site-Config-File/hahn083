@@ -1,0 +1,12 @@
+ENVIRONMENT_TYPE=kaas
+KUBE_CRED=hahn083.conf
+NAMESPACE=enm83
+TIME_ZONE=UTC
+RWX_STORAGE_CLASS=network-file
+STORAGE_CLASS=network-block
+ENM_LAUNCHER_HOSTNAME=enm83.hahn083.rnd.gic.ericsson.se
+HOST_SYSTEM_IDENTIFIER=gazelles
+LB_EXTERNAL_PORT=10.117.148.250
+COM_INF_LDAP_ROOT_SUFFIX=dc=gazelles,dc=com
+COM_INF_LDAP_ADMIN_CN=uid=ssouser,ou=people,dc=gazelles,dc=com
+EMAIL_LIST=PDLAZELLES@pdl.internal.ericsson.com

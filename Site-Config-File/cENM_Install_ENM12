@@ -1,0 +1,12 @@
+ENVIRONMENT_TYPE=kaas
+KUBE_CRED=hoff075.conf
+NAMESPACE=enm12
+RWX_STORAGE_CLASS=network-file
+STORAGE_CLASS=network-block
+ENM_LAUNCHER_HOSTNAME=enm12.hoff075.rnd.gic.ericsson.se
+HOST_SYSTEM_IDENTIFIER=enm12
+LB_EXTERNAL_PORT=10.120.216.250
+TIME_ZONE=UTC
+COM_INF_LDAP_ROOT_SUFFIX=dc=enm12,dc=com
+COM_INF_LDAP_ADMIN_CN=uid=ssouser,ou=people,dc=enm12,dc=com
+EMAIL_LIST=PDLTHE16TH@pdl.internal.ericsson.com

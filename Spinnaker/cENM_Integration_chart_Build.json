@@ -1,0 +1,132 @@
+{
+  "appConfig": {},
+  "description": "",
+  "disabled": false,
+  "keepWaitingPipelines": true,
+  "lastModifiedBy": "enaggop",
+  "limitConcurrent": true,
+  "notifications": [
+    {
+      "address": "peddinti.tarakesam@tcs.com",
+      "cc": "nageswara.rao.goparaju@ericsson.com",
+      "level": "pipeline",
+      "type": "email",
+      "when": [
+        "pipeline.complete",
+        "pipeline.failed"
+      ]
+    }
+  ],
+  "parameterConfig": [
+    {
+      "default": "${trigger.properties['ISO_VERSION'] ?: ''}",
+      "description": "",
+      "hasOptions": false,
+      "label": "",
+      "name": "ISO_VERSION",
+      "options": [
+        {
+          "value": ""
+        }
+      ],
+      "pinned": false,
+      "required": false
+    },
+    {
+      "default": "${trigger.properties['PRODUCT_SET'] ?: ''}",
+      "description": "",
+      "hasOptions": false,
+      "label": "",
+      "name": "PRODUCT_SET",
+      "options": [
+        {
+          "value": ""
+        }
+      ],
+      "pinned": false,
+      "required": false
+    }
+  ],
+  "stages": [
+    {
+      "completeOtherBranchesThenFail": true,
+      "continuePipeline": false,
+      "failPipeline": false,
+      "job": "infra-integration",
+      "master": "oss-fem16s11-eiffel004",
+      "name": "Build-Infra-Integration-Chart",
+      "parameters": {
+        "ISO_VERSION": "${parameters['ISO_VERSION']}",
+        "PRODUCT_SET": "${parameters['PRODUCT_SET']}"
+      },
+      "propertyFile": "artifact.properties",
+      "refId": "6",
+      "requisiteStageRefIds": [],
+      "type": "jenkins"
+    },
+    {
+      "completeOtherBranchesThenFail": true,
+      "continuePipeline": false,
+      "failPipeline": false,
+      "job": "monitoring-integration",
+      "master": "oss-fem16s11-eiffel004",
+      "name": "Build-monitoring-Integration-Chart",
+      "parameters": {
+        "ISO_VERSION": "${parameters['ISO_VERSION']}",
+        "PRODUCT_SET": "${parameters['PRODUCT_SET']}"
+      },
+      "propertyFile": "artifact.properties",
+      "refId": "14",
+      "requisiteStageRefIds": [],
+      "type": "jenkins"
+    },
+    {
+      "completeOtherBranchesThenFail": true,
+      "continuePipeline": false,
+      "failPipeline": false,
+      "job": "stateless-integration",
+      "master": "oss-fem16s11-eiffel004",
+      "name": "Build-stateless-integration-Chart",
+      "parameters": {
+        "ISO_VERSION": "${parameters['ISO_VERSION']}",
+        "PRODUCT_SET": "${parameters['PRODUCT_SET']}"
+      },
+      "propertyFile": "artifact.properties",
+      "refId": "16",
+      "requisiteStageRefIds": [],
+      "type": "jenkins"
+    },
+    {
+      "completeOtherBranchesThenFail": false,
+      "continuePipeline": false,
+      "failPipeline": true,
+      "job": "eric-enm-int-sync",
+      "master": "oss-fem16s11-eiffel004",
+      "name": "eric-enm-int-sync",
+      "parameters": {
+        "INFRA_CHART_VERSION": "${#stage('Build-Infra-Integration-Chart')['context']['INT_CHART_VERSION']}",
+        "ISO_VERSION": "${parameters['ISO_VERSION']}",
+        "MONITORING_CHART_VERSION": "${#stage('Build-monitoring-Integration-Chart')['context']['INT_CHART_VERSION']}",
+        "PRODUCT_SET": "${parameters['PRODUCT_SET']}",
+        "STATELESS_CHART_VERSION": "${#stage('Build-stateless-integration-Chart')['context']['INT_CHART_VERSION']}"
+      },
+      "refId": "19",
+      "requisiteStageRefIds": [
+        "14",
+        "6",
+        "16"
+      ],
+      "type": "jenkins"
+    }
+  ],
+  "triggers": [
+    {
+      "enabled": true,
+      "job": "eric-enm-e2e-build",
+      "master": "oss-fem16s11-eiffel004",
+      "propertyFile": "artifact.properties",
+      "type": "jenkins"
+    }
+  ],
+  "updateTs": "1594488828817"
+}

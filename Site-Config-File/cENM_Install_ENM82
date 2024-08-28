@@ -1,0 +1,12 @@
+ENVIRONMENT_TYPE=kaas
+KUBE_CRED=hoff082.conf
+NAMESPACE=enm82
+TIME_ZONE=Europe/Dublin
+RWX_STORAGE_CLASS=network-file
+STORAGE_CLASS=network-block
+ENM_LAUNCHER_HOSTNAME=enm82.hoff082.rnd.gic.ericsson.se
+HOST_SYSTEM_IDENTIFIER=enm82
+LB_EXTERNAL_PORT=10.63.136.251
+COM_INF_LDAP_ROOT_SUFFIX=dc=enm82,dc=com
+COM_INF_LDAP_ADMIN_CN=uid=ssouser,ou=people,dc=enm82,dc=com
+EMAIL_LIST=PDLAPOLLO1@pdl.internal.ericsson.com

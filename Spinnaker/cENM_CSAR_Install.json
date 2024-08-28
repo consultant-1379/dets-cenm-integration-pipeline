@@ -1,0 +1,122 @@
+{
+  "appConfig": {},
+  "disabled": false,
+  "keepWaitingPipelines": false,
+  "lastModifiedBy": "enaggop",
+  "limitConcurrent": true,
+  "parameterConfig": [
+    {
+      "default": "${trigger.properties['csar_package_version'] ?: ''}",
+      "description": "",
+      "hasOptions": false,
+      "label": "",
+      "name": "csar_package_version",
+      "options": [
+        {
+          "value": ""
+        }
+      ],
+      "pinned": false,
+      "required": false
+    },
+    {
+      "default": "${trigger.properties['monitoring_chart_version'] ?: ''}",
+      "description": "",
+      "hasOptions": false,
+      "label": "",
+      "name": "monitoring_chart_version",
+      "options": [
+        {
+          "value": ""
+        }
+      ],
+      "pinned": false,
+      "required": false
+    },
+    {
+      "default": "${trigger.properties['integration_value_version'] ?: ''}",
+      "description": "",
+      "hasOptions": false,
+      "label": "",
+      "name": "integration_value_version",
+      "options": [
+        {
+          "value": ""
+        }
+      ],
+      "pinned": false,
+      "required": false
+    }
+  ],
+  "spelEvaluator": "v4",
+  "stages": [
+    {
+      "continuePipeline": false,
+      "failPipeline": true,
+      "job": "cENM_CSAR_Initial_Install",
+      "master": "oss-fem16s11-eiffel004",
+      "name": "cENM CSAR INSTALL ENM101",
+      "notifications": [
+        {
+          "address": "nageswara.rao.goparaju@ericsson.com",
+          "level": "stage",
+          "type": "email",
+          "when": [
+            "stage.complete",
+            "stage.failed"
+          ]
+        }
+      ],
+      "parameters": {
+        "CLUSTER_ID": "C12a009",
+        "CSAR_PACKAGE_VERSION": "${parameters['csar_package_version']}"
+      },
+      "refId": "2",
+      "requisiteStageRefIds": [
+        "3"
+      ],
+      "sendNotifications": true,
+      "stageTimeoutMs": 21600000,
+      "type": "jenkins"
+    },
+    {
+      "continuePipeline": false,
+      "failPipeline": true,
+      "job": "cENM_Monitoring_Initial_Install",
+      "master": "oss-fem16s11-eiffel004",
+      "name": "cENM Monitoring Install ENM101",
+      "notifications": [
+        {
+          "address": "nageswara.rao.goparaju@ericsson.com",
+          "level": "stage",
+          "type": "email",
+          "when": [
+            "stage.complete",
+            "stage.failed"
+          ]
+        }
+      ],
+      "parameters": {
+        "CLUSTER_ID": "c12a009",
+        "Email_List": "nageswara.rao.goparaju@ericsson.com",
+        "INTEGRATION_VALUE_VERSION": "${parameters['integration_value_version']}",
+        "MONITORING_INTEGRATION_CHART_VERSION": "${parameters['monitoring_chart_version']}"
+      },
+      "refId": "3",
+      "requisiteStageRefIds": [],
+      "sendNotifications": true,
+      "stageTimeoutMs": 3600000,
+      "type": "jenkins"
+    }
+  ],
+  "triggers": [
+    {
+      "enabled": true,
+      "job": "eric-enm-csar-sync",
+      "master": "oss-fem16s11-eiffel004",
+      "propertyFile": "artifact.properties",
+      "type": "jenkins"
+    }
+  ],
+  "updateTs": "1594579708927"
+}

@@ -1,0 +1,47 @@
+{
+  "keepWaitingPipelines": false,
+  "lastModifiedBy": "ztarped",
+  "limitConcurrent": true,
+  "parameterConfig": [
+    {
+      "default": "${trigger.properties['CHART_VERSION'] ?: ''}",
+      "description": "",
+      "hasOptions": false,
+      "label": "",
+      "name": "CHART_VERSION",
+      "options": [
+        {
+          "value": ""
+        }
+      ],
+      "pinned": false,
+      "required": false
+    }
+  ],
+  "stages": [
+    {
+      "continuePipeline": false,
+      "failPipeline": true,
+      "job": "eric-enm-e2e_update-HLC-version",
+      "master": "oss-fem16s11-eiffel004",
+      "name": "e2e  HLC Version Update Build",
+      "parameters": {
+        "CHART_VERSION": "${parameters['CHART_VERSION']}"
+      },
+      "refId": "1",
+      "requisiteStageRefIds": [],
+      "stageTimeoutMs": 3600000,
+      "type": "jenkins"
+    }
+  ],
+  "triggers": [
+    {
+      "enabled": true,
+      "job": "eric-enm-common-helmchart-library",
+      "master": "oss-fem16s11-eiffel004",
+      "propertyFile": "artifact.properties",
+      "type": "jenkins"
+    }
+  ],
+  "updateTs": "1587384346093"
+}

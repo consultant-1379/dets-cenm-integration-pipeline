@@ -1,0 +1,80 @@
+def commonMethods
+
+pipeline{
+    agent {
+        node
+        {
+            label SLAVE
+        }
+    }
+    environment {
+        HOME_DIR = "${WORKSPACE}"
+        cenm_utilities_docker_image = "armdocker.rnd.ericsson.se/proj-enm/cenm-build-utilities:latest"
+    }
+    parameters {
+        string(name: 'environment_name', description: 'The environment which you need to cleanup')
+    }
+    stages{
+        stage('Clean Up WorkSpace'){
+            steps{
+                deleteDir()
+            }
+        }
+        stage('Checkout Integration Pipeline Git Repository') {
+            steps {
+                git branch: 'master',
+                url: 'ssh://gerrit.ericsson.se:29418/OSS/com.ericsson.oss.containerisation/eric-enm-integration-pipeline-code'
+            }
+        }
+        stage('Load common methods') {
+            steps {
+                script {
+                    commonMethods = load("${env.WORKSPACE}/Jenkins/JobDSL/CommonMethods.groovy")
+                }
+            }
+        }
+        stage('Delete docker image') {
+            steps {
+                script {
+                    commonMethods.delete_build_utilities_image()
+                }
+            }
+        }
+        stage('Pull docker image') {
+            steps {
+                script {
+                    sh "docker pull ${cenm_utilities_docker_image}"
+                }
+            }
+        }
+        stage( 'site config') {
+            steps {
+                script {
+                    def site_config_properties = readProperties  (file:"Site-Config-File/${environment_name}")
+                    env.KUBE_CRED = site_config_properties['KUBE_CRED']
+                    env.NAMESPACE = site_config_properties['NAMESPACE']
+                    env.kubeConfig = "${workspace}/.kube/${KUBE_CRED}"
+                    env.HELM_BINARY = "helm"
+                    env.helm = "docker run --rm -v ${kubeConfig}:/root/.kube/config -v ${WORKSPACE}:${WORKSPACE} --workdir ${WORKSPACE} ${cenm_utilities_docker_image} helm"
+                    env.kubectl = "docker run --rm  -v ${kubeConfig}:/root/.kube/config -v ${WORKSPACE}:${WORKSPACE} --workdir ${WORKSPACE} ${cenm_utilities_docker_image} kubectl"
+                    env.cenm_build_utilities_docker_image = "docker run --rm -v ${kubeConfig}:/root/.kube/config -v ${WORKSPACE}:${WORKSPACE} -v /home/lciadm100/:/home/lciadm100/ --workdir ${WORKSPACE} ${cenm_utilities_docker_image}"
+                }
+            }
+        }
+        stage( 'Pre Configurations' ) {
+            steps {
+                script {
+                    commonMethods.set_kube_config_file()
+                }
+            }
+        }
+        stage( 'cenm deployment delete' ) {
+            steps {
+                script{
+                    commonMethods.cenm_uninstall()
+                }
+            }
+        }
+    }
+}
+

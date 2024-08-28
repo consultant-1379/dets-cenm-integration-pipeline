@@ -1,0 +1,421 @@
+#!/usr/bin/env groovy
+
+/* IMPORTANT:
+ *
+ * In order to make this pipeline work, the following configuration on Jenkins is required:
+ * - slave with a specific label (see pipeline.agent.label below)
+ * - credentials plugin should be installed and have the secrets with the following names:
+ */
+
+def kubectlGetResource(type){
+    return sh(script : "${kubectl} get ${type} -n ${NAMESPACE} | grep -v \'NAME\' |  awk -F\' \' \'{print \$1}\'", returnStdout: true).split()
+}
+
+
+def integration_values_file_keys_exists(element, keys){
+     def str = keys.tokenize(".");
+    _element = element
+     for (i = 0; i < str.size(); i++) {
+        try{
+            _element = _element[str[i]]  
+           } catch( err ) {
+              return false;
+            }
+       }
+    return true;
+}
+
+def checkHealthyPods() {
+    desiredStatefulset = sh ( script: "${kubectl} -n ${NAMESPACE} get sts    | grep -v 'NAME' | awk -F' ' '{stssum += \$2} END {print stssum}'", returnStdout: true ).trim()
+    echo "${desiredStatefulset}"
+    desiredDeployment  = sh ( script: "${kubectl} -n ${NAMESPACE} get deploy | grep -v 'NAME' | awk -F' ' '{depsum += \$2} END {print depsum}'", returnStdout: true ).trim()
+    echo "${desiredDeployment}"
+    currentHealthyPods = sh ( script: "${kubectl} -n ${NAMESPACE} get pods   | grep -v 'NAME' | grep 'Running' | awk -F' ' '{print \$2}' | awk -F'/' '{podsum += \$1} END {print podsum}'", returnStdout: true ).trim()
+    echo "${currentHealthyPods}"
+    desiredDeploy=desiredDeployment.toInteger()
+    currentHealthy=currentHealthyPods.toInteger()
+    desiredStateful=desiredStatefulset.toInteger()
+
+    if ( desiredStateful + desiredDeploy <= currentHealthy ) {
+        echo "Desired:Statefulset + Desired:Deployment is lesser than or equal to Current: Running Healthy Pods"
+    } else {
+        echo "Desired:Statefulset + Desired:Deployment is not matching Current: Running Healthy Pods"
+        sh "sleep 60"
+        sh "exit 1"
+    }
+}
+
+
+def smokeTest() {
+    response = sh (script: "curl -4 --insecure -X POST -d \"IDToken1=Administrator&IDToken2=TestPassw0rd\" https://${ENM_LAUNCHER_HOSTNAME}/login -H \"Content-Type: application/x-www-form-urlencoded\" -H \"Accept-Encoding: gzip,deflate\" -H \"Accept: */*\" -L -H \'cache-control: no-cache\'", returnStdout: true ).trim()
+    echo response
+    if ( response.contains("Authentication Successful") ){
+       echo "Success! Can login to ENM"
+    } else {
+       echo "Failed! Can\'t login to ENM"
+       sh "exit 1"
+    }
+}
+
+def delete_build_utilities_image()
+{
+    images = sh (script: '''docker images|awk '{ print $1":"$2 }' ''', returnStdout: true ).trim()
+    if ( images.contains("${cenm_utilities_docker_image}") ){
+       sh '''  docker rmi -f "${cenm_utilities_docker_image}" '''
+       echo "${cenm_utilities_docker_image} image removed from the slave"
+}
+}
+
+def updateIntegrationValues() {
+    try {
+            filename = "${HOME_DIR}/${INTEGRATION_VALUE_FILE}"
+                values = readYaml file: filename
+                values.global.persistentVolumeClaim.storageClass = "${STORAGE_CLASS}"
+                values.global.ingress.enmHost = "${ENM_LAUNCHER_HOSTNAME}"
+                values.global.enmProperties.COM_INF_LDAP_ROOT_SUFFIX = "${COM_INF_LDAP_ROOT_SUFFIX}"
+                values.global.enmProperties.COM_INF_LDAP_ADMIN_CN = "${COM_INF_LDAP_ADMIN_CN}"
+                values.global.rwx.storageClass = "${RWX_STORAGE_CLASS}"
+                values.global.timezone= "${TIME_ZONE}"
+                values.global.enmProperties.host_system_identifier = "${HOST_SYSTEM_IDENTIFIER}"
+                values."eric-data-graph-database-nj".persistentVolumeClaim.storageClass = "${STORAGE_CLASS}"
+                values."eric-data-graph-database-nj".persistentVolumeClaim.backup.storageClass = "${STORAGE_CLASS}"
+                values."eric-data-graph-database-nj".persistentVolumeClaim.logging.storageClass = "${STORAGE_CLASS}"
+                values."eric-data-document-database-pg".persistentVolumeClaim.storageClassName = "${STORAGE_CLASS}"
+                values."eric-data-search-engine".persistence.data.persistentVolumeClaim.storageClassName = "${STORAGE_CLASS}"
+                values."eric-data-search-engine".persistence.backup.persistentVolumeClaim.storageClassName = "${RWX_STORAGE_CLASS}"
+                values."eric-data-search-engine".persistence.master.persistentVolumeClaim.storageClassName = "${STORAGE_CLASS}"
+                values."eric-data-eshistory-search-engine".persistence.data.persistentVolumeClaim.storageClassName = "${STORAGE_CLASS}"
+                values."eric-data-eshistory-search-engine".persistence.backup.persistentVolumeClaim.storageClassName = "${RWX_STORAGE_CLASS}"
+                values."eric-data-eshistory-search-engine".persistence.master.persistentVolumeClaim.storageClassName = "${STORAGE_CLASS}"
+                values."eric-cnom-document-database-mg".persistence.storageClass="${STORAGE_CLASS}"
+                values."eric-cnom-server".ingress.hostname="${ENM_LAUNCHER_HOSTNAME}"
+                if ( integration_values_file_keys_exists(values, 'eric-ctrl-bro.persistence.persistentVolumeClaim.storageClassName') ){
+                       values."eric-ctrl-bro".persistence.persistentVolumeClaim.storageClassName = "${STORAGE_CLASS}"
+                }
+                if (ENVIRONMENT_TYPE.equals("kaas")){
+                     values.global.enmProperties.lb_external_port = "${LB_EXTERNAL_PORT}"
+                } else {
+                     values.global.vips.fm_vip_address = "${FM_VIP_ADDRESS}"
+                     values.global.vips.cm_vip_address = "${CM_VIP_ADDRESS}"
+                     values.global.vips.pm_vip_address = "${PM_VIP_ADDRESS}"
+                     values.global.vips.amos_vip_address = "${AMOS_VIP_ADDRESS}"
+                     values.global.vips.general_scripting_vip_address = "${SCRIPT_VIP_ADDRESS}"
+                     values.global.vips.element_manager_vip_address = "${ELEMENT_MANAGER_VIP}"
+                     values.global.vips.ui_vip_address = "${UI_VIP_ADDRESS}"
+                     values.global.vips.visinamingsb_vip_address = "${CM_VIP_ADDRESS}"
+                }
+
+        sh "rm -f ${filename}"
+        writeYaml file: filename, data: values
+    } catch( err ) {
+        echo "$err"
+    }
+}
+
+def emailReport(content){
+    def DEFAULT_REPLYTO = 'EricssonHyderabad.ENMMisty@tcs.com,EricssonHyderabad.ENMDewdrops@tcs.com'
+
+    def subject = "${env.JOB_NAME} - Build #${env.BUILD_NUMBER} - ${currentBuild.currentResult}!"
+
+    try {
+        emailext(body: content, mimeType: 'text/html', from: 'jenkins_monitoring@ericsson.com',
+            replyTo: DEFAULT_REPLYTO, subject: subject,
+            to: "${EMAIL_LIST}" )
+    } catch( err ){
+        echo "$err"
+    }
+}
+
+def reportHeading(status){
+
+    def deployResult
+    def color
+    def investigation
+
+    if(status == 'Success'){
+        deployResult = "Success"
+        color = "#9ACD32"
+        investigation = "NA"
+    } else if(status == 'Failed'){
+        deployResult = "Failed"
+        color = "#DC143C"
+        investigation = "In progress, will be included in a follow up email"
+    } else if(status == 'Aborted'){
+        deployResult = "Aborted"
+        color = "#95A5A6"
+        investigation = "(If applicable), will be included in a follow up email"
+    }
+
+    def report = "Hi All,\n\n <h2>${NAMESPACE} Deployment Result: <span style=\"background-color:${color};\">${status}</span></h2>"
+    def BrochartVersion = sh (script : "${helm} list -n ${NAMESPACE} | grep eric-enm-bro-integration-${NAMESPACE} | awk \'{print \$(NF-1)}\'", returnStdout: true)
+    def PredeploychartVersion = sh (script : "${helm} list -n ${NAMESPACE} | grep eric-enm-pre-deploy-integration-${NAMESPACE} | awk \'{print \$(NF-1)}\'", returnStdout: true)
+    def InfrachartVersion = sh (script : "${helm} list -n ${NAMESPACE} | grep eric-enm-infra-integration-${NAMESPACE} | awk \'{print \$(NF-1)}\'", returnStdout: true)
+    def StatelesschartVersion = sh (script : "${helm} list -n ${NAMESPACE} | grep eric-enm-stateless-integration-${NAMESPACE} | awk \'{print \$(NF-1)}\'", returnStdout: true)
+    report += " <ul><li><strong>Login URL :</strong> https://${ENM_LAUNCHER_HOSTNAME}/login</li>"
+    report += "<li><strong>Bro Chart version :</strong> ${BrochartVersion}</li>"
+    report += "<li><strong>Pre Deploy Chart version :</strong> ${PredeploychartVersion}</li>"
+    report += "<li><strong>Infra Chart version :</strong> ${InfrachartVersion}</li>"
+    report += "<li><strong>Stateless Chart version :</strong> ${StatelesschartVersion}</li>"
+    report += "<li><strong>Please find the Phase 1 Deploy Job Details:</strong>  <a href=${BUILD_URL}>${BUILD_URL}</a></li>"
+    report += "<li><strong>Investigation Results  :  ${investigation}</strong></li></ul>"
+
+    report = report.replace("\n","</br>")
+    return report
+}
+
+def printPods(){
+    def failedState = sh (script : "${kubectl} -n ${NAMESPACE} get pods | egrep \'NAME|Running\' | egrep \'0/|NAME\'" , returnStdout: true)
+    def initState = sh (script : "${kubectl} -n ${NAMESPACE} get pods | grep -v Running || true", returnStdout: true)
+    def sidecarState= sh (script : "${kubectl} -n ${NAMESPACE} get pods | egrep \'NAME|Running\' | egrep \'1/2|NAME\'" , returnStdout: true)
+    def report = "#kubectl -n ${NAMESPACE} get pods | egrep \'NAME|Running\' | egrep \'0/|NAME\' \n<pre>${failedState}</pre> \n\n\n #kubectl -n ${NAMESPACE} get pods | grep -v Running \n<pre>${initState}</pre> \n\n\n #kubectl -n ${NAMESPACE} get pods | egrep \'NAME|Running\' | egrep \'1/2|NAME\' \n<pre>${sidecarState}</pre>"
+    echo "${report}"
+
+    report = report.replace("\n","</br>")
+    report += "<style> pre {display: block;font-family: Lucida Console, Monaco, monospace; white-space: pre;} </style>";
+
+    return report
+}
+
+pipeline{
+    agent {
+            node
+            {
+            label SLAVE
+            }
+        }
+    environment {
+        HOME_DIR = "${WORKSPACE}"
+        cenm_utilities_docker_image = "armdocker.rnd.ericsson.se/proj-enm/cenm-build-utilities:latest"
+    }
+    stages{
+        stage('Clean Up WorkSpace'){
+                steps{
+                        deleteDir()
+                     }
+        }
+        stage('Delete docker image') {
+            steps {
+                script {
+                    delete_build_utilities_image()
+                }
+            }
+        }
+        stage('Pull docker image') {
+            steps {
+                script {
+                    sh "docker pull ${cenm_utilities_docker_image}"
+                }
+            }
+        }
+        stage('Checkout Integration Pipeline Git Repository') {
+            steps {
+                git branch: 'master',
+                        url: '${GERRIT_MIRROR}/OSS/com.ericsson.oss.containerisation/eric-enm-integration-pipeline-code'
+                sh '''
+                    git remote set-url origin --push ${GERRIT_CENTRAL}/OSS/com.ericsson.oss.containerisation/eric-enm-integration-pipeline-code
+                '''
+            }
+        }
+        stage('BRO chart Download'){
+                steps{
+                     sh 'curl -4 https://arm.epk.ericsson.se/artifactory/proj-enm-dev-internal-helm/eric-enm-bro-integration/eric-enm-bro-integration-${BRO_CHART_VERSION}.tgz -o eric-enm-bro-integration-${BRO_CHART_VERSION}.tgz'
+            }
+        }
+        stage('Pre Deploy chart Download'){
+                steps{
+                     sh 'curl -4 https://arm.epk.ericsson.se/artifactory/proj-enm-dev-internal-helm/eric-enm-pre-deploy-integration/eric-enm-pre-deploy-integration-${PRE_DEPLOY_CHART_VERSION}.tgz -o eric-enm-pre-deploy-integration-${PRE_DEPLOY_CHART_VERSION}.tgz'
+            }
+        }
+        stage('Infra chart Download'){
+                steps{
+                     sh 'curl -4 https://arm.epk.ericsson.se/artifactory/proj-enm-dev-internal-helm/eric-enm-infra-integration/eric-enm-infra-integration-${INFRA_CHART_VERSION}.tgz -o eric-enm-infra-integration-${INFRA_CHART_VERSION}.tgz'
+            }
+        }
+            stage('stateless-integration chart version'){
+                steps{
+                       sh 'curl -4 https://arm.epk.ericsson.se/artifactory/proj-enm-dev-internal-helm/eric-enm-stateless-integration/eric-enm-stateless-integration-${STATELESS_CHART_VERSION}.tgz -o eric-enm-stateless-integration-${STATELESS_CHART_VERSION}.tgz'
+               }
+        }
+        stage( 'Site Config Properties' ) {
+            steps {
+                 script{
+                         def site_config_properties = readProperties  (file:"Site-Config-File/${environment_name}")
+                         env.KUBE_CRED = site_config_properties['KUBE_CRED']
+                         env.NAMESPACE = site_config_properties['NAMESPACE']
+                         env.RWX_STORAGE_CLASS =site_config_properties['RWX_STORAGE_CLASS']
+                         env.STORAGE_CLASS =site_config_properties['STORAGE_CLASS']
+                         env.TIME_ZONE=site_config_properties['TIME_ZONE']
+                         env.HOST_SYSTEM_IDENTIFIER = site_config_properties['HOST_SYSTEM_IDENTIFIER']
+                         env.ENM_LAUNCHER_HOSTNAME=site_config_properties['ENM_LAUNCHER_HOSTNAME']
+                         env.EMAIL_LIST=site_config_properties['EMAIL_LIST']
+                         env.COM_INF_LDAP_ROOT_SUFFIX= site_config_properties['COM_INF_LDAP_ROOT_SUFFIX']
+                         env.COM_INF_LDAP_ADMIN_CN=site_config_properties['COM_INF_LDAP_ADMIN_CN']
+                         env.ENVIRONMENT_TYPE=site_config_properties['ENVIRONMENT_TYPE']
+                         echo "${ENVIRONMENT_TYPE}"
+                         if (ENVIRONMENT_TYPE.equals("kaas")) {
+                             echo "${ENVIRONMENT_TYPE}"
+                             env.INTEGRATION_VALUE_FILE="${INTEGRATION_VALUES_TYPE}-${INTEGRATION_VALUE_VERSION}.yaml"
+                             echo "${INTEGRATION_VALUE_FILE}"
+                             env.LB_EXTERNAL_PORT=site_config_properties['LB_EXTERNAL_PORT']
+                         } else if (ENVIRONMENT_TYPE.equals("openstack")){
+                               env.INTEGRATION_VALUE_FILE="${INTEGRATION_VALUES_TYPE}-${INTEGRATION_VALUE_VERSION}.yaml"
+                               env.FM_VIP_ADDRESS = site_config_properties['FM_VIP_ADDRESS']
+                               env.CM_VIP_ADDRESS = site_config_properties['CM_VIP_ADDRESS']
+                               env.PM_VIP_ADDRESS = site_config_properties['PM_VIP_ADDRESS']
+                               env.AMOS_VIP_ADDRESS = site_config_properties['AMOS_VIP_ADDRESS']
+                               env.SCRIPT_VIP_ADDRESS = site_config_properties['SCRIPT_VIP_ADDRESS']
+                               env.UI_VIP_ADDRESS = site_config_properties['UI_VIP_ADDRESS']
+                               env.VISINAMINGSB_VIP_ADDRESS = site_config_properties['CM_VIP_ADDRESS']
+                               env.ELEMENT_MANAGER_VIP = site_config_properties['ELEMENT_MANAGER_VIP']
+                         } else {
+                           echo "Please provide correct Environment Type In site-config file of the Job"
+                           exit 1
+                         }
+                         env.kubeConfig = "${workspace}/.kube/${KUBE_CRED}"
+                         env.helm = "docker run --rm -v ${kubeConfig}:/root/.kube/config -v ${WORKSPACE}:${WORKSPACE} --workdir ${WORKSPACE} ${cenm_utilities_docker_image} helm"
+                         env.kubectl = "docker run --rm  -v ${kubeConfig}:/root/.kube/config -v ${WORKSPACE}:${WORKSPACE} --workdir ${WORKSPACE} ${cenm_utilities_docker_image} kubectl"
+                      }
+              }
+        }
+         stage('integration value version'){
+            steps{
+                  script {
+                     sh "wget https://arm.epk.ericsson.se/artifactory/proj-enm-dev-internal-helm/eric-enm-integration-values/${INTEGRATION_VALUES_TYPE}-${INTEGRATION_VALUE_VERSION}.yaml"
+                     updateIntegrationValues()
+                 }
+            }
+        }
+        stage( 'Connect environment' ) {
+            steps {
+                   sh 'mkdir -p ${PWD}/.kube && chmod 775 ${PWD}/.kube && cp -v ${PWD}/Kube-Config-Files/${KUBE_CRED} ${PWD}/.kube/${KUBE_CRED} && chmod 664 ${PWD}/.kube/${KUBE_CRED}'
+            }
+        }
+         stage( 'cENM Deployment Delete' ) {
+             steps{
+                    script{
+                            if (ENVIRONMENT_TYPE.equals("openstack")){
+                                 sh "${kubectl} delete EricIngress ingress-lvs -n ingress-nginx || true"
+                                 sh "${kubectl} delete svc ingress-lvs -n ingress-nginx || true"
+                            }
+                            sh "${helm} uninstall eric-enm-stateless-integration-${NAMESPACE} -n ${NAMESPACE} || true"
+                            sh '''
+                               while [[ "$(${kubectl} get pods -n ${NAMESPACE})" == *"Terminating"* ]];
+                               do
+                                   logger "Waiting for pods to terminate ...";
+                                   sleep 30 ;
+                               done
+                            '''
+                            sh "${helm} uninstall eric-enm-infra-integration-${NAMESPACE} -n ${NAMESPACE} || true"
+                            sh '''
+                               while [[ "$(${kubectl} get pods -n ${NAMESPACE})" == *"Terminating"* ]];
+                               do
+                                   logger "Waiting for pods to terminate ...";
+                                   sleep 30 ;
+                               done
+                            '''
+                            sh "${helm} uninstall eric-enm-pre-deploy-integration-${NAMESPACE} -n ${NAMESPACE} || true"
+                            sh '''
+                               while [[ "$(${kubectl} get pods -n ${NAMESPACE})" == *"Terminating"* ]];
+                               do
+                                   logger "Waiting for pods to terminate ...";
+                                   sleep 30 ;
+                               done
+                            '''
+                            sh "${helm} uninstall eric-enm-bro-integration-${NAMESPACE} -n ${NAMESPACE} || true"
+                            sh '''
+                               while [[ "$(${kubectl} get pods -n ${NAMESPACE})" == *"Terminating"* ]];
+                               do
+                                   logger "Waiting for pods to terminate ...";
+                                   sleep 30 ;
+                               done
+                            '''
+                            sh "${kubectl} delete jobs eric-enm-models-all-services-job -n ${NAMESPACE} || true"
+                            sh "${kubectl} delete jobs eric-enm-models-service-job -n ${NAMESPACE} || true"
+                            sh "${kubectl} delete jobs eric-enm-models-post-install-job -n ${NAMESPACE} || true"
+                            sh "${kubectl} delete jobs eric-tm-ingress-controller-cr-crd -n ${NAMESPACE} || true"
+                            sh "${kubectl} delete jobs neo4j-dps-job -n ${NAMESPACE} || true"
+                            sh "${kubectl} delete jobs sfwkdb-schemamgt -n ${NAMESPACE} || true"
+                            sh "${kubectl} delete jobs flsdb-schemamgt -n ${NAMESPACE} || true"
+                            sh "${kubectl} delete jobs eric-enm-symlink-creation-job -n ${NAMESPACE} || true"
+                            sh "${kubectl} delete jobs eric-enm-update-software-version-history-job -n ${NAMESPACE} || true"
+                            sh "${kubectl} delete crd httpproxies.projectcontour.io || true"
+                            sh "${kubectl} delete crd ingressroutes.contour.heptio.com || true"
+                            sh "${kubectl} delete crd tlscertificatedelegations.contour.heptio.com || true"
+                            sh "${kubectl} delete crd tlscertificatedelegations.projectcontour.io || true"
+                           sh '''
+                                for i in $(${kubectl} get pvc -n ${NAMESPACE} | egrep 'pg-data-postgres|pv-eric|datadir|neo4j-pvc|ctrl-bro|elasticsearch|eric-pm-server|eshistory|eric-enm|eric-cnom-document-database-mg' | awk '{print $1}');
+                                do
+                                   ${kubectl} delete pvc $i -n ${NAMESPACE}|| true;
+                                done
+                            '''
+                    }
+           }
+       }
+        stage('Install cENM') {
+            stages {
+                stage('Install cENM BRO chart') {
+                    steps {
+                        sh("${helm} install eric-enm-bro-integration-${NAMESPACE} --values ${INTEGRATION_VALUE_FILE} eric-enm-bro-integration-${BRO_CHART_VERSION}.tgz -n ${NAMESPACE} --wait --wait-for-jobs --timeout 600s")
+                    }
+                }
+                stage('Install cENM Pre Deploy chart') {
+                    steps {
+                        sh("${helm} install eric-enm-pre-deploy-integration-${NAMESPACE} --values ${INTEGRATION_VALUE_FILE} eric-enm-pre-deploy-integration-${PRE_DEPLOY_CHART_VERSION}.tgz -n ${NAMESPACE} --wait --wait-for-jobs --timeout 1500s")
+                    }
+                }
+                stage('Install cENM Infra chart') {
+                    steps {
+                        sh("${helm} install eric-enm-infra-integration-${NAMESPACE} --values ${INTEGRATION_VALUE_FILE} eric-enm-infra-integration-${INFRA_CHART_VERSION}.tgz -n ${NAMESPACE} --wait --wait-for-jobs --timeout 6h")
+                    }
+                }
+                stage('Install cENM Stateless chart') {
+                    steps {
+                        sh("${helm} install eric-enm-stateless-integration-${NAMESPACE} --values ${INTEGRATION_VALUE_FILE}  eric-enm-stateless-integration-${STATELESS_CHART_VERSION}.tgz -n ${NAMESPACE} --wait --wait-for-jobs --timeout 4h")
+                    }
+                }
+            }
+        }
+
+        stage('CheckPods Running'){
+            steps{
+                script{
+                    retry(5){
+                        checkHealthyPods()
+                    }
+                }
+            }
+        }
+    }
+    post{
+        failure {
+            script{
+                echo "Failure"
+                def report = reportHeading("Failed")
+                report += printPods()
+                emailReport(report)
+            }
+        }
+        aborted{
+            script{
+                echo "Aborted"
+                def report = reportHeading("Aborted")
+                report += printPods()
+                emailReport(report)
+            }
+        }
+        success{
+            script{
+                echo "Success"
+                def report = reportHeading("Success")
+                emailReport(report)
+            }
+        }
+        always {
+            script{
+                currentBuild.displayName = "initial_install on : ${environment_name}"
+                sh("cat ${HOME_DIR}/${INTEGRATION_VALUE_FILE}")
+                archiveArtifacts "${INTEGRATION_VALUE_FILE}"
+            }
+        }
+    }
+}

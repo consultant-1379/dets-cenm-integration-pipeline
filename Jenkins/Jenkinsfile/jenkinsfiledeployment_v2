@@ -1,0 +1,224 @@
+pipeline{
+    agent {
+            node
+            {
+               label slave
+            }
+        }
+    options {
+        timeout(time: 7, unit: 'HOURS')
+    }
+    environment {
+        HOME_LCIADM100="/home/lciadm100"
+        PRE_POST_DOCKER_IMAGE_NAME = "cenm-pre-post-deployment-utility"
+        DEPLOYMENT_DOCKER_IMAGE_NAME = "cenm-deployment-utility"
+        drop = product_set_version.split('\\.')[0..1].join('.')
+    }
+    stages{
+        stage('Clean Up WorkSpace'){
+            steps{
+                echo "cleaning"
+                deleteDir()
+            }
+        }
+        stage('Checkout Integration Pipeline Git Repository') {
+            steps {
+                git branch: 'master',
+                        url: '${GERRIT_MIRROR}/OSS/com.ericsson.oss.containerisation/eric-enm-integration-pipeline-code'
+                        sh '''echo "none"'''
+                sh '''
+                    git remote set-url origin --push ${GERRIT_CENTRAL}/OSS/com.ericsson.oss.containerisation/eric-enm-integration-pipeline-code
+                '''
+            }
+        }
+        stage('Delete, download, extract and load the utility images'){
+            steps{
+                script{
+                    echo "deleting and downloading the utility images"
+                    sh "tar -xvf Software/jq-1.0.1.tar ; chmod +x ./jq"
+                    sh "curl -4 --location --request GET 'https://ci-portal.seli.wh.rnd.internal.ericsson.com/api/cloudnative/getCloudNativeProductSetContent/${drop}/${product_set_version}/'>cn_confidence_level_response.json"
+                    env.pre_post_version = sh (script : "./jq '.[4].deployment_utilities_detail_data|.[]|select(.name==\"cenm-pre-post-deployment-utility\")|.version' cn_confidence_level_response.json|sed 's/\"//g'", returnStdout: true).trim()
+                    env.deployment_version = sh (script : "./jq '.[4].deployment_utilities_detail_data|.[]|select(.name==\"cenm-deployment-utility\")|.version' cn_confidence_level_response.json|sed 's/\"//g'", returnStdout: true).trim()
+                    env.pre_post_dev_url = sh (script : "./jq '.[4].deployment_utilities_detail_data|.[]|select(.name==\"cenm-pre-post-deployment-utility\")|.dev_url' cn_confidence_level_response.json|sed 's/\"//g'", returnStdout: true).trim()
+                    env.deployment_dev_url = sh (script : "./jq '.[4].deployment_utilities_detail_data|.[]|select(.name==\"cenm-deployment-utility\")|.dev_url' cn_confidence_level_response.json|sed 's/\"//g'", returnStdout: true).trim()
+                    sh "echo ${pre_post_version}"
+                    sh "echo ${pre_post_dev_url}"
+                    sh "echo ${deployment_version}"
+                    sh "echo ${deployment_dev_url}"
+                    sh "mkdir -p utilities"
+                    sh "curl -4 ${pre_post_dev_url} -o utilities/cenm-pre-post-deployment-utility-${pre_post_version}.tgz"
+                    sh "curl -4 ${deployment_dev_url} -o utilities/cenm-deployment-utility-${deployment_version}.tgz"
+                    sh "docker rm -f prepost || true"
+                    sh "docker rm -f deployment || true"
+                    sh ''' for i in $(docker images | grep -E 'pre-post|cenm-deployment' | awk '{print $3}');do docker rmi -f $i;done '''
+                    sh "docker load -i utilities/cenm-pre-post-deployment-utility-${pre_post_version}.tgz"
+                    sh "docker load -i utilities/cenm-deployment-utility-${deployment_version}.tgz"
+                    env.PRE_POST_DOCKER_IMAGE="armdocker.rnd.ericsson.se/proj-enm/${PRE_POST_DOCKER_IMAGE_NAME}:${pre_post_version}"
+                    env.DEPLOYMENT_DOCKER_IMAGE= "armdocker.rnd.ericsson.se/proj-enm/${DEPLOYMENT_DOCKER_IMAGE_NAME}:${deployment_version}"
+                    env.CENM_PRE_POST_UTILITY="docker run --name=prepost --rm -v /var/run/docker.sock:/var/run/docker.sock -v ${HOME_LCIADM100}/.ssh:${HOME_LCIADM100}/.ssh -v ${HOME_LCIADM100}/.kube/:${HOME_LCIADM100}/.kube -v ${WORKSPACE}:${WORKSPACE} --workdir ${WORKSPACE} ${PRE_POST_DOCKER_IMAGE}"
+                    env.CENM_DEPLOYMENT_UTILITY="docker run --name=deployment --rm -v ${HOME_LCIADM100}/.ssh:${HOME_LCIADM100}/.ssh -v ${HOME_LCIADM100}/.kube/:${HOME_LCIADM100}/.kube -v ${WORKSPACE}:${WORKSPACE} -v ${WORKSPACE}/keyvalues:${HOME_LCIADM100}/cenm/playbooks/keyvalues ${DEPLOYMENT_DOCKER_IMAGE} python3"
+                }
+            }
+        }
+        stage('Updating DIT documents'){
+            when {
+                 expression{env.use_case != "Backup" &&  env.use_case != "Teardown"}
+            }
+            steps{
+                script{
+                    echo "updating DIT documents"
+                    sh "${CENM_PRE_POST_UTILITY} UpdatingDITDocuments --DEPLOYMENT ${environment_name} --PRODUCTSET ${product_set_version}"
+                }
+            }
+        }
+        stage('Fetching Documents'){
+            steps{
+                script{
+                    echo "Fetching Documents"
+                    sh "${CENM_PRE_POST_UTILITY} FetchingDITData --DEPLOYMENT ${environment_name}"
+                }
+            }
+        }
+        stage('Validation checks'){
+            steps{
+                script{
+                    echo "checking Validations"
+                    sh "${CENM_PRE_POST_UTILITY} validation_checks --environment_name ${environment_name} --product_set_version ${product_set_version} --artifact_type ${Artifact_type} --orchestration_type ${orchestration_type} --container_registry_type ${container_registry_type} --use_case ${use_case}"
+                }
+            }
+        }
+        stage('Download Artifacts'){
+            when {
+                 expression{env.use_case != "Backup"}
+            }
+            steps{
+                script{
+                    echo "Downloading Artifacts"
+                    sh "${CENM_PRE_POST_UTILITY} download --product_set_version ${product_set_version} --artifact_type ${Artifact_type} --snapshot_artifact_location ${snapshot_csar_lite_location} --deployment_size ${deployment_size}"
+                }
+            }
+        }
+        stage('Populate site values file'){
+            when {
+                 expression{env.use_case != "Backup" &&  env.use_case != "Teardown"}
+            }
+            steps{
+                script{
+                    echo "populating site values file"
+                    sh "${CENM_PRE_POST_UTILITY} populate --environment_name ${environment_name} --deployment_size ${deployment_size} --artifact_type ${Artifact_type} --snapshot_integration_key_value_pairs ${snapshot_integration_key_value_pairs}"
+                }
+            }
+        }
+        stage('Use Case'){
+            steps{
+                script{
+                    stage("${use_case} with ${orchestration_type}"){
+                        echo "${use_case} with ${orchestration_type}"
+                        sh "${CENM_DEPLOYMENT_UTILITY} select_use_case.py --artifact_type ${Artifact_type} --orchestration_type ${orchestration_type} --scope ${scope} --use_case ${use_case} --deployment_size ${deployment_size} --workspace ${WORKSPACE} --backup_name ${backup_name} --container_registry_type ${container_registry_type}"
+                    }
+                }
+            }
+        }
+        stage('Post deployment checks'){
+            when {
+                 expression{env.use_case != "Backup" &&  env.use_case != "Teardown"}
+            }
+            steps{
+                script{
+                    echo "post deployment checks"
+                    sh "${CENM_PRE_POST_UTILITY} post"
+                }
+            }
+        }
+    }
+    post{
+        failure {
+            script{
+                echo "Failure"
+                sh "${CENM_PRE_POST_UTILITY} generate_email_report --status 'Failed' --build_url ${BUILD_URL} --use_case ${use_case}"
+                emailReport()
+            }
+        }
+        aborted{
+            script{
+                echo "Aborted"
+                sh "${CENM_PRE_POST_UTILITY} generate_email_report --status 'Aborted' --build_url ${BUILD_URL} --use_case ${use_case}"
+                emailReport()
+            }
+        }
+        success{
+            script{
+                echo "Success"
+                sh "${CENM_PRE_POST_UTILITY} generate_email_report --status 'Success' --build_url ${BUILD_URL} --use_case ${use_case}"
+                emailReport()
+            }
+        }
+        always {
+            script{
+                currentBuild.displayName = "${use_case} with ${orchestration_type} on: ${environment_name}"
+                removing_left_over_containers()
+                generate_artifact_file()
+                if (env.use_case != 'Backup' && env.use_case != 'Teardown'){
+                    archive_values_file()
+                    get_charts_version()
+                    currentBuild.description = "<b>Bro Chart Version = ${bro_chart_version}<br>Monitoring chart version = ${monitoring_chart_version}<br>Pre Deploy Chart Version = ${pre_deploy_chart_version}<br>Infra Chart Version = ${infra_chart_version}<br>Stateless Chart Version = ${stateless_chart_version}<br>Integration Value Version = ${integration_value_version}</b>"
+                }
+            }
+        }
+    }
+}
+
+def removing_left_over_containers(){
+    sh "docker rm -f prepost || true"
+    sh "docker rm -f deployment || true"
+    try{
+        env.CLIENT_MACHINE_TYPE = sh (script : "grep -w CLIENT_MACHINE_TYPE 'keyvalues/config.py' | awk -F '=' '{print \$2}' | sed \"s/'//g\"", returnStdout: true).trim()
+        env.CLIENT_MACHINE = sh (script : "grep -w client_machine 'keyvalues/config.py' | awk 'NR==2' | awk -F '=' '{ print \$2}'| sed \"s/'//g\"", returnStdout: true).trim()
+        if("${client_machine_type}" == 'client_machine' && "${client_machine}" == 'True'){
+            env.client_machine_username = sh (script : " awk -F '=' '/CLIENT_MACHINE_USERNAME/ {print \$2}' 'keyvalues/config.py' | sed \"s/'//g\"", returnStdout: true).trim()
+            env.client_machine_ipaddress = sh (script : " awk -F '=' '/CLIENT_MACHINE_IPADDRESS/ {print \$2}' 'keyvalues/config.py' | sed \"s/'//g\"", returnStdout: true).trim()
+            sh "ssh -o 'LogLevel=error' -o 'StrictHostKeyChecking no' ${client_machine_username}@${client_machine_ipaddress} 'docker rm -f prepost || true'"
+            sh "ssh -o 'LogLevel=error' -o 'StrictHostKeyChecking no' ${client_machine_username}@${client_machine_ipaddress} 'docker rm -f deployment || true'"
+        }
+    }
+    catch(err){
+        echo "$err"
+        sh "exit 1"
+    }
+}
+
+def emailReport(){
+
+    def subject = "${env.JOB_NAME} - Build #${env.BUILD_NUMBER} - ${currentBuild.currentResult}!"
+    env.REPORT = sh (script : " awk -F 'report=' '/report/ {print \$2}' 'keyvalues/config.py' | sed \"s/'//g\"", returnStdout: true).trim()
+    env.EMAIL_LIST = sh (script : " awk -F '=' '/EMAIL_ID/ {print \$2}' 'keyvalues/config.py' | sed \"s/'//g\"", returnStdout: true).trim()
+
+    try {
+        emailext(body: REPORT, mimeType: 'text/html', from: 'jenkins_monitoring@ericsson.com',
+            subject: subject,
+            to: "${EMAIL_LIST}" )
+    } catch( err ){
+        echo "$err"
+    }
+}
+
+def archive_values_file(){
+    env.FILENAME = sh (script : " awk -F '=' '/integrationvaluesfilepath/ {print \$2}' 'keyvalues/config.py' | sed \"s/'//g\"", returnStdout: true).trim()
+    archiveArtifacts "${FILENAME}"
+}
+
+def get_charts_version(){
+    env.bro_chart_version = sh (script : " awk -F '=' '/Bro_Chart_Version/ {print \$2}' 'keyvalues/config.py' | sed \"s/'//g\"", returnStdout: true).trim()
+    env.monitoring_chart_version = sh (script : " awk -F '=' '/Monitoring_Chart_Version/ {print \$2}' 'keyvalues/config.py' | sed \"s/'//g\"", returnStdout: true).trim()
+    env.pre_deploy_chart_version = sh (script : " awk -F '=' '/Pre_Deploy_Chart_Version/ {print \$2}' 'keyvalues/config.py' | sed \"s/'//g\"", returnStdout: true).trim()
+    env.infra_chart_version = sh (script : " awk -F '=' '/Infra_Chart_Version/ {print \$2}' 'keyvalues/config.py' | sed \"s/'//g\"", returnStdout: true).trim()
+    env.stateless_chart_version = sh (script : " awk -F '=' '/Stateless_Chart_Version/ {print \$2}' 'keyvalues/config.py' | sed \"s/'//g\"", returnStdout: true).trim()
+    env.integration_value_version = sh (script : " awk -F '=' '/Integration_Value_Version/ {print \$2}' 'keyvalues/config.py' | sed \"s/'//g\"", returnStdout: true).trim()
+}
+
+def generate_artifact_file(){
+    sh 'echo "environment_name=${environment_name}" >> artifact.properties'
+    sh 'echo "product_set_version=${product_set_version}" >> artifact.properties'
+    sh 'echo "drop=${drop}" >> artifact.properties'
+    archiveArtifacts 'artifact.properties'
+}

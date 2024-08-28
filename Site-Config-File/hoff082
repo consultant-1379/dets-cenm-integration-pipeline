@@ -1,0 +1,12 @@
+ENVIRONMENT_TYPE=kaas
+KUBE_CRED=hoff082.conf
+NAMESPACE=enigma
+TIME_ZONE=UTC
+RWX_STORAGE_CLASS=nfs
+STORAGE_CLASS=network-block
+ENM_LAUNCHER_HOSTNAME=enigma.hoff082.rnd.gic.ericsson.se
+HOST_SYSTEM_IDENTIFIER=enigma
+LB_EXTERNAL_PORT=10.63.136.251
+COM_INF_LDAP_ROOT_SUFFIX=dc=enigma,dc=com
+COM_INF_LDAP_ADMIN_CN=uid=ssouser,ou=people,dc=enigma,dc=com
+EMAIL_LIST=PDLAPOLLO1@pdl.internal.ericsson.com

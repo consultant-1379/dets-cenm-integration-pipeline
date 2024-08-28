@@ -1,0 +1,32 @@
+{
+  "appConfig": {},
+  "disabled": false,
+  "keepWaitingPipelines": false,
+  "lastModifiedBy": "enaggop",
+  "limitConcurrent": true,
+  "spelEvaluator": "v4",
+  "stages": [
+    {
+      "continuePipeline": false,
+      "failPipeline": true,
+      "job": "Content_Merged",
+      "master": "oss-fem16s11-eiffel004",
+      "name": "cENM Content Merged",
+      "parameters": {},
+      "refId": "1",
+      "requisiteStageRefIds": [],
+      "stageTimeoutMs": 3600000,
+      "type": "jenkins"
+    }
+  ],
+  "triggers": [
+    {
+      "enabled": true,
+      "job": "eric-enm-int-sync",
+      "master": "oss-fem16s11-eiffel004",
+      "propertyFile": "artifact.properties",
+      "type": "jenkins"
+    }
+  ],
+  "updateTs": "1594562137927"
+}

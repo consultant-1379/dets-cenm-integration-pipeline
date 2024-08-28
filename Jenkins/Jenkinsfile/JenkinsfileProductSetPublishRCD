@@ -1,0 +1,35 @@
+#!/usr/bin/env groovy
+
+pipeline{
+       agent {
+            node{
+                  label 'Cloud-Native'
+            }
+        }
+    parameters {
+        string(defaultValue: "", description: 'Product set number for ex. 21.18.74', name: 'product_set')
+    }
+    stages{
+        stage('Add new Product set to RCD') {
+            steps {
+                script {
+                    sh 'echo product set: ${product_set}'
+                    sh 'curl -H "Authorization: Basic eC1hdXRoLXRva2Vu==" -H "Content-Type: application/json" -X POST -d \'{"productset": \"${product_set}\"}\' http://resourceconfigurationdata.internal.ericsson.com:5000/addproductset >> curl_command_results.txt'
+                    archiveArtifacts 'curl_command_results.txt'
+                }
+            }
+        }
+    }
+    post{
+        success{
+            mail to: 'PDLTORDEPL@pdl.internal.ericsson.com',
+                    subject: "Success: RCD API Call with product set ${product_set}",
+                    body: "Made a RCD API call with product set : ${product_set} \n "
+        }
+        failure {
+            mail to: 'PDLTORDEPL@pdl.internal.ericsson.com',
+                    subject: "Failed: RCD API Call with product set ${product_set}",
+                    body: "Made a RCD API call with product set : ${product_set}"
+        }
+    }
+}

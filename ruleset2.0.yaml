@@ -1,0 +1,64 @@
+modelVersion: 2.0
+
+docker-images:
+  - cnbuild-build-utilities: armdocker.rnd.ericsson.se/proj-enm/cenm-build-utilities:latest
+
+properties:
+ - integration-chart-path: chart/eric-enm-infra-integration
+ - chart-repo-ci-internal: https://arm.epk.ericsson.se/artifactory/proj-enm-dev-internal-helm/
+ - bro-helm-chart-name: eric-enm-bro-integration
+ - bro-helm-chart: eric-enm-bro-integration/
+ - pre-deploy-helm-chart-name: eric-enm-pre-deploy-integration
+ - helm-chart-path: charts/
+ - utility_base_repo: https://arm.seli.gic.ericsson.se/artifactory/proj-enm-dev-internal-helm/utilities
+ - bro-metadata-file-name: bro-int-metadata-artifact.json
+ - pre-deploy-metadata-file-name: pre-deploy-int-metadata-artifact.json
+
+env:
+  - RELEASE (default=true)
+  - PRODUCT_SET
+  - ISO_VERSION
+  - INTEGRATION_VALUE_VERSION
+  - STATELESS_CHART_VERSION
+  - INFRA_CHART_VERSION
+  - PRE_DEPLOY_CHART_VERSION
+  - BRO_CHART_VERSION
+  - BRO_CHART_FILE_SIZE
+  - PRE_DEPLOY_CHART_FILE_SIZE
+  - PRE_DEPLOY_CHART_COMMIT_HASH
+  - BRO_CHART_COMMIT_HASH
+  - SPRINT_TAG
+  - DOCKER_IMAGE_NAME
+  - UTILITY_TGZ_FILE_SIZE
+  - DOCKER_IMAGE_VERSION
+  - DOCKER_COMMIT_HASH
+  - UTILITY_METADATA_FILE_NAME
+var:
+  - commit-hash
+  - version
+  - version-prefix
+  - rstate
+
+rules:
+  generate-bro-int-metadata-parameters:
+    - task: bro-generate-int-metadata-parameters
+      docker-image: cnbuild-build-utilities
+      cmd:
+       - tar -xvf charts/eric-enm-bro-integration-${env.BRO_CHART_VERSION}.tgz -C charts/
+       - int-generate-metadata-artifacts --product-set ${env.PRODUCT_SET} --int-chart-name ${bro-helm-chart-name} --int-chart-version ${env.BRO_CHART_VERSION}  --int-chart-repo ${chart-repo-ci-internal}${bro-helm-chart} --int-chart-path ${helm-chart-path}/${bro-helm-chart-name}  --iso-version ${env.ISO_VERSION} --metadata-file-name ${bro-metadata-file-name} --int-file-size ${env.BRO_CHART_FILE_SIZE}  --int-commit-hash ${env.BRO_CHART_COMMIT_HASH}
+  generate-pre-deploy-int-metadata-parameters:
+    - task: pre-deploy-generate-int-metadata-parameters
+      docker-image: cnbuild-build-utilities
+      cmd:
+       - tar -xvf charts/eric-enm-pre-deploy-integration-${env.PRE_DEPLOY_CHART_VERSION}.tgz -C charts/
+       - int-generate-metadata-artifacts --product-set ${env.PRODUCT_SET} --int-chart-name ${pre-deploy-helm-chart-name} --int-chart-version ${env.PRE_DEPLOY_CHART_VERSION}  --int-chart-repo ${chart-repo-ci-internal}${pre-deploy-helm-chart-name} --int-chart-path ${helm-chart-path}/${pre-deploy-helm-chart-name}  --iso-version ${env.ISO_VERSION} --metadata-file-name ${pre-deploy-metadata-file-name} --int-file-size ${env.PRE_DEPLOY_CHART_FILE_SIZE} --int-commit-hash ${env.PRE_DEPLOY_CHART_COMMIT_HASH}
+  generate-int-sync-metadata-parameters:
+    - task: generate-int-sync-metadata-parameters
+      docker-image: cnbuild-build-utilities
+      cmd:
+       - generate-int-sync-metadata-artifacts --product-set ${env.PRODUCT_SET} --int-chart-repo ${chart-repo-ci-internal} --int-chart-path ${helm-chart-path}  --iso-version ${env.ISO_VERSION}
+  generate-utilities-int-metadata-parameters:
+    - task: generate-utilities-int-metadata-parameters
+      docker-image: cnbuild-build-utilities
+      cmd:
+       - generate-utilities-int-metadata-parameters --utility_image_name ${env.DOCKER_IMAGE_NAME} --utility_image_version ${env.DOCKER_IMAGE_VERSION} --utility_base_repo ${utility_base_repo} --product-set-version ${env.PRODUCT_SET} --int-commit-hash ${env.DOCKER_COMMIT_HASH} --utility-tgz-filesize ${env.UTILITY_TGZ_FILE_SIZE} --metadata-file-name ${env.UTILITY_METADATA_FILE_NAME}

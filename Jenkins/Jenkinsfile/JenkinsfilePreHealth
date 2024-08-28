@@ -1,0 +1,68 @@
+#!/usr/bin/env groovy
+
+pipeline {
+        agent {
+            node
+                 {
+                     label SLAVE
+                 }
+        }
+    environment {
+        cenm_utilities_docker_image = "armdocker.rnd.ericsson.se/proj-enm/cenm-build-utilities:latest"
+    }
+    stages {
+        stage ('Clean workspace') {
+            steps {
+                 deleteDir()
+            }
+        }
+        stage('Checkout Cloud-Native pipeline Git Repository') {
+            steps {
+                 git branch: 'master',
+                        url:'ssh://gerrit.ericsson.se:29418/OSS/com.ericsson.oss.containerisation/eric-enm-integration-pipeline-code'
+            }
+        }
+        stage( 'Site Config Properties' ) {
+            steps {
+                 script{
+                         def site_config_properties = readProperties  (file:"Site-Config-File/${environment_name}")
+                         env.KUBE_CRED = site_config_properties['KUBE_CRED']
+                         env.NAMESPACE = site_config_properties['NAMESPACE']
+                         env.EMAIL_LIST = site_config_properties['EMAIL_LIST']
+                      }
+              }
+        }
+        stage ('Pre configuration'){
+            steps {
+                 script {
+                       sh 'mkdir -p ${PWD}/.kube && chmod 775 ${PWD}/.kube && cp -v ${PWD}/Kube-Config-Files/${KUBE_CRED} ${PWD}/.kube/${KUBE_CRED} && chmod 664 ${PWD}/.kube/${KUBE_CRED}'
+                       env.kubeConfig = "${workspace}/.kube/${KUBE_CRED}"
+                       env.cenm_build_utilities_docker_image = "docker run --rm -v ${kubeConfig}:/root/.kube/config -v ${WORKSPACE}:${WORKSPACE} --workdir ${WORKSPACE} ${cenm_utilities_docker_image}"
+                }
+            }
+        }
+        stage ('Verifying system health check'){
+            options {
+                retry(3)
+            }
+            steps {
+                 script {
+                        sh '${cenm_build_utilities_docker_image} bash script/cenm_pre_health_check.sh --cenm-name-space=${NAMESPACE}'
+                }
+            }
+        }
+        stage ('generate artifactory'){
+            steps {
+                 archiveArtifacts 'integration_charts_history.html'
+                 archiveArtifacts 'cenm_pre_health_check_*.log'
+            }
+        }
+    }
+     post {
+        failure {
+            mail to: "${EMAIL_LIST}",
+                    subject: "Failed Pipeline: ${currentBuild.fullDisplayName}",
+                    body: "Failure on ${env.BUILD_URL}"
+        }
+    }
+}

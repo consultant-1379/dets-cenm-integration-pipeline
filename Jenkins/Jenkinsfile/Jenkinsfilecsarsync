@@ -1,0 +1,31 @@
+#!/usr/bin/env groovy
+
+pipeline{
+       agent {
+            node{
+                  label SLAVE
+            }
+        }
+    stages{
+        stage('Clean Up WorkSpace'){
+           steps{
+                   deleteDir()
+                }
+        }
+        stage('Generate Parameters') {
+            steps {
+                script {
+                            sh 'echo "csar_package_version=${CSAR_PACKAGE_VERSION}" > artifact.properties'
+                            archiveArtifacts 'artifact.properties'
+                }
+            }
+        }
+    }
+    post{
+        failure {
+            mail to: 'EricssonHyderabad.ENMMisty@tcs.com',
+                    subject: "Failed Pipeline: ${currentBuild.fullDisplayName}",
+                    body: "Failure on ${env.BUILD_URL}"
+        }
+    }
+}

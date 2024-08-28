@@ -1,0 +1,72 @@
+def commonMethods
+
+pipeline{
+    agent {
+            node
+            {
+               label slave
+            }
+        }
+    environment {
+        HOME_DIR = "${WORKSPACE}"
+        https_proxy = "http://www-proxy.lmera.ericsson.se:8080/"
+        cenm_utilities_docker_image = "armdocker.rnd.ericsson.se/proj-enm/cenm-build-utilities:latest"
+    }
+    stages{
+        stage('Clean Up WorkSpace'){
+                steps{
+                        deleteDir()
+                     }
+        }
+        stage('Checkout Integration Pipeline Git Repository') {
+            steps {
+                git branch: 'master',
+                        url: 'ssh://gerrit.ericsson.se:29418/OSS/com.ericsson.oss.containerisation/eric-enm-integration-pipeline-code'
+            }
+        }
+        stage('Load common methods') {
+            steps {
+                script {
+                    commonMethods = load("${env.WORKSPACE}/Jenkins/JobDSL/CommonMethods.groovy")
+                }
+            }
+        }
+        stage( 'Site Config Properties' ) {
+            steps {
+                 script{
+                         commonMethods.read_site_config_file_other_resource()
+                      }
+              }
+        }
+        stage( 'Pre Configurations' ) {
+            steps {
+                script{
+                      commonMethods.set_kube_config_file()
+               }
+            }
+        }
+        stage('cENM Deployment Delete'){
+            steps{
+                script{
+                    commonMethods.monitoring_uninstall()
+                }
+            }
+        }
+    }
+    post{
+        failure {
+            script{
+                echo "Failure"
+                mail to: 'EricssonHyderabad.ENMMisty@tcs.com',
+                subject: "Failed Pipeline: ${currentBuild.fullDisplayName}",
+                body: "Failure on ${env.BUILD_URL}"
+            }
+        }
+        always {
+            script{
+                currentBuild.displayName = "Monitoring teardown on: ${environment_name}"
+            }
+        }
+    }
+}
+

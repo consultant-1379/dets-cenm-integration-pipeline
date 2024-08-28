@@ -1,0 +1,185 @@
+#!/usr/bin/env groovy
+
+
+//Function to delete existing docker images
+def delete_docker_image()
+{
+    images = sh (script: '''docker images|awk '{ print $1":"$2 }' ''', returnStdout: true ).trim()
+    if ( images.contains("${rule_scan_pluto_image}") ){
+    sh '''  docker rmi -f "${rule_scan_pluto_image}" '''
+    echo "${rule_scan_pluto_image} image removed from the slave"
+    }
+    if (images.contains("${cenm_utilities_docker_image}") ){
+    sh '''  docker rmi -f "${cenm_utilities_docker_image}" '''
+    echo "${cenm_utilities_docker_image} image removed from the slave"
+    }
+}
+
+//Function to get all charts from drop and product set.Copy extracted charts to charts folder.
+
+def get_chart_versions(){
+       echo "Product Set Version: ${PRODUCT_SET}"
+       sh "curl -4 --location --request GET 'https://ci-portal.seli.wh.rnd.internal.ericsson.com/api/cloudnative/getCloudNativeProductSetContent/${drop}/${PRODUCT_SET}/'>cn_confidence_level_response.json"
+       env.infra_chart_version= sh (script : "./jq '.[1] .integration_charts_data|.[] | select(.chart_name==\"eric-enm-infra-integration\")|.chart_version' cn_confidence_level_response.json|sed 's/\"//g'", returnStdout: true).trim()
+            if(env.infra_chart_version==''){
+               error("Invalid Infra Integration chart provided. There is no Cloud native content for the given Product Set Version.")
+            }
+            env.bro_chart_version= sh (script : "./jq '.[1].integration_charts_data|.[]|select(.chart_name==\"eric-enm-bro-integration\")|.chart_version' cn_confidence_level_response.json|sed 's/\"//g'", returnStdout: true).trim()
+            if(env.bro_chart_version==''){
+               error("Invalid Bro Integration chart provided. There is no Cloud native content for the given Product Set Version.")
+            }
+            env.pre_deploy_chart_version= sh (script : "./jq '.[1].integration_charts_data|.[]|select(.chart_name==\"eric-enm-pre-deploy-integration\")|.chart_version' cn_confidence_level_response.json|sed 's/\"//g'", returnStdout: true).trim()
+            if(env.pre_deploy_chart_version==''){
+               error("Invalid Predeploy Integration chart provided. There is no Cloud native content for the given Product Set Version.")
+            }
+            env.stateless_chart_version= sh (script : "./jq '.[1].integration_charts_data|.[]|select(.chart_name==\"eric-enm-stateless-integration\")|.chart_version' cn_confidence_level_response.json|sed 's/\"//g'", returnStdout: true).trim()
+            if(env.stateless_chart_version==''){
+               error("Invalid Stateless Integration chart provided. There is no Cloud native content for the given Product Set Version.")
+            }
+            env.monitoring_chart_version= sh (script : "./jq '.[1].integration_charts_data|.[]|select(.chart_name==\"eric-enm-monitoring-integration\")|.chart_version' cn_confidence_level_response.json|sed 's/\"//g'", returnStdout: true).trim()
+            if(env.monitoring_chart_version==''){
+               error("Invalid Monitoring Integration chart provided. There is no Cloud native content for the given Product Set Version.")
+            }
+      }
+
+pipeline{
+    agent {
+            node
+            {
+               label slave
+            }
+        }
+    options {
+        timeout(time: 900, unit: 'SECONDS')
+        }
+    environment {
+        HOME_DIR = "${WORKSPACE}"
+        cenm_utilities_docker_image = "armdocker.rnd.ericsson.se/proj-enm/cenm-build-utilities:latest"
+        rule_scan_pluto_image = "armdocker.rnd.ericsson.se/proj-adp-cicd-drop/rule-scan-pluto:latest"
+        }
+    stages{
+        stage('Clean Up WorkSpace'){
+                steps{
+                       deleteDir()
+                     }
+             }
+        stage('Checkout Integration Pipeline Git Repository') {
+            steps {
+                git branch: 'master',
+                        url: '${GERRIT_MIRROR}/OSS/com.ericsson.oss.containerisation/eric-enm-integration-pipeline-code'
+                  }
+             }
+        stage('Load common methods') {
+            steps {
+                script {
+                    commonMethods = load("${env.WORKSPACE}/Jenkins/JobDSL/CommonMethods.groovy")
+                 }
+               }
+            }
+        stage('Delete docker image') {
+            steps {
+                script {
+                     delete_docker_image()
+                  }
+                }
+             }
+        stage('Pull docker images') {
+            steps {
+                script {
+                    sh "docker pull ${cenm_utilities_docker_image}"
+                    sh "docker pull ${rule_scan_pluto_image}"
+                }
+            }
+        }
+        stage('Get Target Version'){
+            steps {
+                script {
+                   env.TARGET_VERSION = "${TARGET_VERSION}"
+                }
+            }
+        }
+        stage('Pre Configurations') {
+            steps {
+                script {
+                   sh 'mkdir -p ${HOME_DIR}/conf'
+                   sh 'mkdir -p ${HOME_DIR}/src'
+                   sh 'mkdir -p ${HOME_DIR}/reports'
+                   echo "${TARGET_VERSION}"
+                   sh "sed -i 's/ReplaceTarget/${TARGET_VERSION}/' ${HOME_DIR}/conf/pluto_config.yaml"
+                   sh 'chmod +x ${HOME_DIR}/conf/pluto_config.yaml'
+                   sh 'cat ${HOME_DIR}/conf/pluto_config.yaml'
+                  }
+                }
+        }
+        stage('Get charts'){
+            steps {
+                script {
+                   sh 'echo "product_set_version=${PRODUCT_SET}" '
+                   sh 'echo "drop=${DROP}" '
+                   commonMethods.extract_jq()
+                   get_chart_versions()
+                   }
+                 }
+        }
+        stage('Copy to charts folder'){
+             steps {
+                 script {
+                   sh 'curl -4 https://arm.epk.ericsson.se/artifactory/proj-enm-dev-internal-helm/eric-enm-bro-integration/eric-enm-bro-integration-${bro_chart_version}.tgz -o src/eric-enm-bro-integration-${bro_chart_version}.tgz'
+                   sh 'curl -4 https://arm.epk.ericsson.se/artifactory/proj-enm-dev-internal-helm/eric-enm-pre-deploy-integration/eric-enm-pre-deploy-integration-${pre_deploy_chart_version}.tgz -o src/eric-enm-pre-deploy-integration-${pre_deploy_chart_version}.tgz'
+                   sh 'curl -4 https://arm.epk.ericsson.se/artifactory/proj-enm-dev-internal-helm/eric-enm-monitoring-integration/eric-enm-monitoring-integration-${monitoring_chart_version}.tgz -o src/eric-enm-monitoring-integration-${monitoring_chart_version}.tgz'
+                   sh 'curl -4 https://arm.epk.ericsson.se/artifactory/proj-enm-dev-internal-helm/eric-enm-infra-integration/eric-enm-infra-integration-${infra_chart_version}.tgz -o src/eric-enm-infra-integration-${infra_chart_version}.tgz'
+                   sh 'curl -4 https://arm.epk.ericsson.se/artifactory/proj-enm-dev-internal-helm/eric-enm-stateless-integration/eric-enm-stateless-integration-${stateless_chart_version}.tgz -o src/eric-enm-stateless-integration-${stateless_chart_version}.tgz'
+                 }
+              }
+        }
+        stage('Extracting charts and move to src folder'){
+             steps {
+                script {
+                   echo "Extracting bro charts"
+                   sh "tar -xf src/eric-enm-bro-integration-${bro_chart_version}.tgz -C src/"
+                   echo "Extracting pre deploy charts"
+                   sh "tar -xf src/eric-enm-pre-deploy-integration-${pre_deploy_chart_version}.tgz -C src/"
+                   echo "Extracting monitoring charts"
+                   sh "tar -xf src/eric-enm-monitoring-integration-${monitoring_chart_version}.tgz -C src/"
+                   echo "Extracting infra charts"
+                   sh "tar -xf src/eric-enm-infra-integration-${infra_chart_version}.tgz -C src/"
+                   echo "Extracting stateless charts"
+                   sh "tar -xf src/eric-enm-stateless-integration-${stateless_chart_version}.tgz -C src/"
+                   sh "rm -rf src/*.tgz"
+                   }
+               }
+         }
+         stage('Scanning Helm Charts with Pluto'){
+             steps {
+                 script {
+                   echo "Pluto in Action"
+                   sh  '''  docker run --user $(id -u):$(id -g) -v $PWD/conf:/opt/pluto/conf -v $PWD/src:/tmp/src -v $PWD/reports:/tmp/reports armdocker.rnd.ericsson.se/proj-adp-cicd-drop/rule-scan-pluto:latest '''
+                   }
+                 }
+        }
+}
+        post {
+           success {
+                script {
+                sh 'echo "success"'
+                       }
+                   }
+           failure {
+                script  {
+                sh 'echo "failed"'
+                        }
+                   }
+           always {
+            script{
+            archiveArtifacts 'reports/pluto_charts_scan_eric-enm-bro-integration'
+            archiveArtifacts 'reports/pluto_charts_scan_eric-enm-monitoring-integration'
+            archiveArtifacts 'reports/pluto_charts_scan_eric-enm-pre-deploy-integration'
+            archiveArtifacts 'reports/pluto_charts_scan_eric-enm-infra-integration'
+            archiveArtifacts 'reports/pluto_charts_scan_eric-enm-stateless-integration'
+            }
+        }
+}
+
+}
+
+

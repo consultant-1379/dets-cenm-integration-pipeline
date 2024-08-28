@@ -1,0 +1,93 @@
+def commonMethods
+
+pipeline{
+    agent {
+            node
+            {
+               label slave
+            }
+        }
+
+    environment {
+        HOME_DIR = "${WORKSPACE}"
+        cenm_utilities_docker_image = "armdocker.rnd.ericsson.se/proj-enm/cenm-build-utilities:latest"
+    }
+    stages{
+        stage('Clean Up WorkSpace'){
+                steps{
+                        deleteDir()
+                     }
+        }
+        stage('Checkout Integration Pipeline Git Repository') {
+            steps {
+                git branch: 'master',
+                        url: '${GERRIT_MIRROR}/DETES/com.ericsson.de.stsoss/dets-cenm-integration-pipeline'
+                sh '''
+                    git remote set-url origin --push ${GERRIT_CENTRAL}/DETES/com.ericsson.de.stsoss/dets-cenm-integration-pipeline
+                '''
+            }
+        }
+        stage('Load common methods') {
+            steps {
+                script {
+                    commonMethods = load("${env.WORKSPACE}/Jenkins/JobDSL/CommonMethods.groovy")
+                }
+            }
+        }
+        stage('Delete docker image') {
+            steps {
+                script {
+                    commonMethods.delete_build_utilities_image()
+                }
+            }
+        }
+        stage('Pull docker image') {
+            steps {
+                script {
+                    sh "docker pull ${cenm_utilities_docker_image}"
+                }
+            }
+        }
+        stage( 'setup_kubeconfig_file_for_cluster' ) {
+            steps {
+                script{
+                      commonMethods.extract_jq()
+                      commonMethods.download_kube_config_file_from_dit()
+                      commonMethods.read_site_config_file_other_resource()
+                      commonMethods.set_kube_config_file()
+               }
+            }
+        }
+        stage('cENM Deployment Delete'){
+            steps{
+                script{
+                    commonMethods.cenm_uninstall()
+                }
+            }
+        }
+        stage( 'cENM clean namespace' ) {
+            steps{
+                    script{
+                        commonMethods.cenm_charts_remove()
+                        def removed_resource_list = ['Ingress', 'CronJob', 'Job', 'StatefulSet', 'Deployment', 'Pod', 'Service' , 'PersistentVolumeClaim' , 'ConfigMap' , 'PodDisruptionBudget']
+                        for (int  i = 0; i < removed_resource_list.size(); ++i) {
+                               commonMethods.cenm_complete_uninstall("${removed_resource_list[i]}")
+                               commonMethods.cenm_check_termination("${removed_resource_list[i]}","Terminating")
+            }
+         }
+      }
+    }
+}
+    post{
+        failure {
+            mail to: 'EricssonHyderabad.ENMMisty@tcs.com',
+                    subject: "Failed Pipeline: ${currentBuild.fullDisplayName}",
+                    body: "Failure on ${env.BUILD_URL}"
+        }
+        always {
+            script{
+                currentBuild.displayName = "cENM teardown on: ${environment_name}"
+            }
+        }
+    }
+}

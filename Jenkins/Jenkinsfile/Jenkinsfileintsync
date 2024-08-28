@@ -1,0 +1,294 @@
+#!/usr/bin/env groovy
+
+def defaultBobImage = 'armdocker.rnd.ericsson.se/sandbox/adp-staging/adp-cicd/bob.2.0:1.5.0-1'
+env.bob = new BobCommand()
+         .bobImage(defaultBobImage)
+         .envVars([ISO_VERSION: '${ISO_VERSION}',PRODUCT_SET:'${PRODUCT_SET}',BRO_CHART_VERSION:'${BRO_CHART_VERSION}',MONITORING_CHART_VERSION:'${MONITORING_CHART_VERSION}',PRE_DEPLOY_CHART_VERSION:'${PRE_DEPLOY_CHART_VERSION}',INFRA_CHART_VERSION:'${INFRA_CHART_VERSION}',STATELESS_CHART_VERSION:'${STATELESS_CHART_VERSION}',INTEGRATION_VALUE_VERSION:'${INTEGRATION_VALUE_VERSION}',BRO_CHART_FILE_SIZE:'${BRO_CHART_FILE_SIZE}',PRE_DEPLOY_CHART_FILE_SIZE:'${PRE_DEPLOY_CHART_FILE_SIZE}',PRE_DEPLOY_CHART_COMMIT_HASH:'${PRE_DEPLOY_CHART_COMMIT_HASH}',BRO_CHART_COMMIT_HASH:'${BRO_CHART_COMMIT_HASH}',SPRINT_TAG:'${SPRINT_TAG}',DOCKER_COMMIT_HASH:'${DOCKER_COMMIT_HASH}',DOCKER_IMAGE_PATH:'${DOCKER_IMAGE_PATH}',DOCKER_IMAGE_NAME:'${DOCKER_IMAGE_NAME}',DOCKER_IMAGE_VERSION:'${DOCKER_IMAGE_VERSION}',UTILITY_TGZ_FILE_SIZE:'${UTILITY_TGZ_FILE_SIZE}',UTILITY_METADATA_FILE_NAME:'${UTILITY_METADATA_FILE_NAME}'])
+         .needDockerSocket(true)
+         .toString()
+
+pipeline{
+    agent {
+            node
+            {
+            label SLAVE
+            }
+        }
+        parameters {
+             string(name: 'JENKINS_URL_INTEGRATION', defaultValue: 'https://fem16s11-eiffel004.eiffel.gic.ericsson.se:8443', description: 'Give jenkins fem server. E.g.: https://fem16s11-eiffel004.eiffel.gic.ericsson.se:8443')
+        }
+    stages{
+        stage('Clean Up WorkSpace'){
+           steps{
+                   deleteDir()
+                }
+        }
+        stage('Checkout Integration Pipeline Git Repository') {
+            steps {
+                git branch: 'master',
+                        url: '${GERRIT_MIRROR}/OSS/com.ericsson.oss.containerisation/eric-enm-integration-pipeline-code'
+                sh '''
+                    git remote set-url origin --push ${GERRIT_CENTRAL}/OSS/com.ericsson.oss.containerisation/eric-enm-integration-pipeline-code
+                '''
+            }
+        }
+        stage( 'Pre Configurations' ) {
+            steps {
+                 script{
+                        sh 'mkdir -p ${PWD}/charts'
+                        sh 'mkdir -p ${PWD}/utilities'
+                        }
+            }
+        }
+        stage('BRO Integration Chart Version'){
+            steps{
+                  script {
+                          withCredentials([
+                                 usernamePassword(credentialsId: 'cenmbuild_api_token', usernameVariable: 'JENKINS_USER_NAME', passwordVariable: 'JENKINS_API_TOKEN')]) {
+                                sh "curl -4 -u ${JENKINS_USER_NAME}:${JENKINS_API_TOKEN} ${JENKINS_URL_INTEGRATION}/jenkins/job/bro-integration/lastBuild/artifact/artifact.properties > bro-chart-version"
+                                sh "curl -4 -u ${JENKINS_USER_NAME}:${JENKINS_API_TOKEN} ${JENKINS_URL_INTEGRATION}/jenkins/job/bro-integration/lastBuild/artifact/.bob/var.commit-hash > bro-chart-commit-hash"
+                               }
+                              sh "grep CHART_VERSION=  bro-chart-version | sed 's/INT_CHART_VERSION=//' > BRO_CHART_VERSION"
+                              def BRO_CHART_VERSION = readFile('BRO_CHART_VERSION')
+                              env.BRO_CHART_VERSION=BRO_CHART_VERSION.trim()
+                              def BRO_COMMIT_HASH = readFile('bro-chart-commit-hash')
+                              env.BRO_CHART_COMMIT_HASH=BRO_COMMIT_HASH.trim()
+                              if (env.BRO_CHART_VERSION == "" ) {
+                                 echo "Pipeline fails due to BRO chart version is empty"
+                                 sh "exit 1"
+                              }
+                              if (env.BRO_CHART_COMMIT_HASH == "" ) {
+                                 echo "Pipeline fails due to BRO chart commit hash is empty"
+                                 sh "exit 1"
+                              }
+                    }
+            }
+        }
+         stage('Integration Value Version'){
+            steps{
+                  script {
+                          withCredentials([
+                                 usernamePassword(credentialsId: 'cenmbuild_api_token', usernameVariable: 'JENKINS_USER_NAME', passwordVariable: 'JENKINS_API_TOKEN')]) {
+                             sh "curl -4 -u ${JENKINS_USER_NAME}:${JENKINS_API_TOKEN} ${JENKINS_URL_INTEGRATION}/jenkins/job/eric-enm-integration-values/lastBuild/artifact/artifact.properties > integration-values-version"
+
+                               }
+                              sh "grep CHART_VERSION=  integration-values-version | sed 's/INT_CHART_VERSION=//' > INTEGRATION_VALUE_VERSION" 
+                              def INTEGRATION_VALUE_VERSION = readFile('INTEGRATION_VALUE_VERSION')
+                              env.INTEGRATION_VALUE_VERSION=INTEGRATION_VALUE_VERSION.trim()
+                              if (env.INTEGRATION_VALUE_VERSION == "" ) {
+                                 echo "Pipeline fails due to integration-values file is empty"
+                                 sh "exit 1"
+                              }
+                }
+            }
+        }
+        stage('Download Integration Chart'){
+                steps{
+                     sh 'curl -4 https://arm.epk.ericsson.se/artifactory/proj-enm-dev-internal-helm/eric-enm-bro-integration/eric-enm-bro-integration-${BRO_CHART_VERSION}.tgz -o charts/eric-enm-bro-integration-${BRO_CHART_VERSION}.tgz'
+                     sh 'curl -4 https://arm.epk.ericsson.se/artifactory/proj-enm-dev-internal-helm/eric-enm-monitoring-integration/eric-enm-monitoring-integration-${MONITORING_CHART_VERSION}.tgz -o charts/eric-enm-monitoring-integration-${MONITORING_CHART_VERSION}.tgz'
+                     sh 'curl -4 https://arm.epk.ericsson.se/artifactory/proj-enm-dev-internal-helm/eric-enm-pre-deploy-integration/eric-enm-pre-deploy-integration-${PRE_DEPLOY_CHART_VERSION}.tgz -o charts/eric-enm-pre-deploy-integration-${PRE_DEPLOY_CHART_VERSION}.tgz'
+                     sh 'curl -4 https://arm.epk.ericsson.se/artifactory/proj-enm-dev-internal-helm/eric-enm-infra-integration/eric-enm-infra-integration-${INFRA_CHART_VERSION}.tgz -o charts/eric-enm-infra-integration-${INFRA_CHART_VERSION}.tgz'
+                     sh 'curl -4 https://arm.epk.ericsson.se/artifactory/proj-enm-dev-internal-helm/eric-enm-stateless-integration/eric-enm-stateless-integration-${STATELESS_CHART_VERSION}.tgz -o charts/eric-enm-stateless-integration-${STATELESS_CHART_VERSION}.tgz'
+                    sh 'curl -4 https://arm.epk.ericsson.se/artifactory/proj-enm-dev-internal-helm/eric-enm-integration-values/eric-enm-integration-production-values-${INTEGRATION_VALUE_VERSION}.yaml -o charts/eric-enm-integration-production-values-${INTEGRATION_VALUE_VERSION}.yaml'
+            }
+        }
+        stage('FileSize Chart'){
+                steps{
+                   script {
+                          env.BRO_CHART_FILE_SIZE = sh(script: "du -b charts/eric-enm-bro-integration-${BRO_CHART_VERSION}.tgz | cut -f1", returnStdout: true).trim()
+                  }
+            }
+        }
+       stage('Generate Bro Parameters') {
+         steps {
+          sh "${bob} generate-bro-int-metadata-parameters"
+          archiveArtifacts 'bro-int-metadata-artifact.json'
+         }
+       }
+      stage('Generate int-sync Parameters') {
+            steps {
+              sh "${bob} generate-int-sync-metadata-parameters"
+              archiveArtifacts 'int-sync-metadata-artifact.json'
+            }
+        }
+      stage('cenm-pre-post-deployment-utility'){
+          steps{
+                 script {
+                         withCredentials([
+                             usernamePassword(credentialsId: 'cenmbuild_api_token', usernameVariable: 'JENKINS_USER_NAME', passwordVariable: 'JENKINS_API_TOKEN')]) {
+                             sh "curl -4 -u ${JENKINS_USER_NAME}:${JENKINS_API_TOKEN} ${JENKINS_URL_INTEGRATION}/jenkins/job/cenm-pre-post-deployment-utility/lastBuild/artifact/artifact.properties > artifacts"
+                             sh "curl -4 -u ${JENKINS_USER_NAME}:${JENKINS_API_TOKEN} ${JENKINS_URL_INTEGRATION}/jenkins/job/cenm-pre-post-deployment-utility/lastBuild/artifact/.bob/var.commit-hash > docker-commit-hash"
+                             }
+                             sh "grep IMAGE_VERSION= artifacts | sed 's/INT_DOCKER_IMAGE_VERSION=//' > DOCKER_IMAGE_VERSION"
+                             sh "grep IMAGE_PATH= artifacts | sed 's/INT_DOCKER_IMAGE_PATH=//' > DOCKER_IMAGE_PATH"
+                             sh "grep IMAGE_NAME= artifacts | sed 's/INT_DOCKER_IMAGE_NAME=//' > DOCKER_IMAGE_NAME"
+                             def DOCKER_IMAGE_VERSION = readFile('DOCKER_IMAGE_VERSION')
+                             env.DOCKER_IMAGE_VERSION=DOCKER_IMAGE_VERSION.trim()
+                             def DOCKER_COMMIT_HASH = readFile('docker-commit-hash')
+                             env.DOCKER_COMMIT_HASH=DOCKER_COMMIT_HASH.trim()
+                             def DOCKER_IMAGE_PATH = readFile('DOCKER_IMAGE_PATH')
+                             env.DOCKER_IMAGE_PATH = DOCKER_IMAGE_PATH.trim()
+                             def DOCKER_IMAGE_NAME = readFile('DOCKER_IMAGE_NAME')
+                             env.DOCKER_IMAGE_NAME = DOCKER_IMAGE_NAME.trim()
+                             echo "${DOCKER_IMAGE_VERSION}"
+                             echo "${DOCKER_IMAGE_PATH}"
+                             echo "${DOCKER_IMAGE_NAME}"
+                             echo "${DOCKER_COMMIT_HASH}"
+                             env.UTILITY_METADATA_FILE_NAME = 'pre-post-int-metadata-artifacts.json'
+                             echo "${UTILITY_METADATA_FILE_NAME}"
+                             if (env.DOCKER_IMAGE_VERSION == "" ) {
+                                echo "Pipeline fails due to Docker image version is empty"
+                                sh "exit 1"
+                             }
+                             if (env.DOCKER_COMMIT_HASH == "" ) {
+                                echo "Pipeline fails due to commit hash is empty"
+                                sh "exit 1"
+                             }
+                             generate_metadata_filesize()
+                          }
+                     }
+            }
+       stage('cenm-deployment-utility'){
+           steps{
+                 script {
+                         withCredentials([
+                             usernamePassword(credentialsId: 'cenmbuild_api_token', usernameVariable: 'JENKINS_USER_NAME', passwordVariable: 'JENKINS_API_TOKEN')]) {
+                                 sh "curl -4 -u ${JENKINS_USER_NAME}:${JENKINS_API_TOKEN} ${JENKINS_URL_INTEGRATION}/jenkins/job/cenm-deployment-utility/lastBuild/artifact/artifact.properties > artifacts"
+                                 sh "curl -4 -u ${JENKINS_USER_NAME}:${JENKINS_API_TOKEN} ${JENKINS_URL_INTEGRATION}/jenkins/job/cenm-deployment-utility/lastBuild/artifact/.bob/var.commit-hash > docker-commit-hash"
+                              }
+                             sh "grep IMAGE_VERSION= artifacts | sed 's/INT_DOCKER_IMAGE_VERSION=//' > DOCKER_IMAGE_VERSION"
+                             sh "grep IMAGE_PATH= artifacts | sed 's/INT_DOCKER_IMAGE_PATH=//' > DOCKER_IMAGE_PATH"
+                             sh "grep IMAGE_NAME= artifacts | sed 's/INT_DOCKER_IMAGE_NAME=//' > DOCKER_IMAGE_NAME"
+                             def DOCKER_IMAGE_VERSION = readFile('DOCKER_IMAGE_VERSION')
+                             env.DOCKER_IMAGE_VERSION=DOCKER_IMAGE_VERSION.trim()
+                             def DOCKER_COMMIT_HASH = readFile('docker-commit-hash')
+                             env.DOCKER_COMMIT_HASH=DOCKER_COMMIT_HASH.trim()
+                             def DOCKER_IMAGE_PATH = readFile('DOCKER_IMAGE_PATH')
+                             env.DOCKER_IMAGE_PATH = DOCKER_IMAGE_PATH.trim()
+                             def DOCKER_IMAGE_NAME = readFile('DOCKER_IMAGE_NAME')
+                             env.DOCKER_IMAGE_NAME = DOCKER_IMAGE_NAME.trim()
+                             echo "${DOCKER_IMAGE_VERSION}"
+                             echo "${DOCKER_COMMIT_HASH}"
+                             echo "${DOCKER_IMAGE_PATH}"
+                             echo "${DOCKER_IMAGE_NAME}"
+                             env.UTILITY_METADATA_FILE_NAME = 'deployment-int-metadata-artifacts.json'
+                             echo "${UTILITY_METADATA_FILE_NAME}"
+                             if (env.DOCKER_IMAGE_VERSION == "" ) {
+                                echo "Pipeline fails due to Docker image version is empty"
+                                sh "exit 1"
+                             }
+                             if (env.DOCKER_COMMIT_HASH == "" ) {
+                                echo "Pipeline fails due to commit hash is empty"
+                                sh "exit 1"
+                             }
+                             generate_metadata_filesize()
+                       }
+                 }
+           }
+        stage('Getting Dit version'){
+            steps{
+                script{
+                    withCredentials([
+                         usernamePassword(credentialsId: 'cenmbuild_api_token', usernameVariable: 'JENKINS_USER_NAME', passwordVariable: 'JENKINS_API_TOKEN')]) {
+                         sh "curl -4 -u ${JENKINS_USER_NAME}:${JENKINS_API_TOKEN} ${JENKINS_URL_INTEGRATION}/jenkins/job/CENM-DIT-INFORMATION/lastBuild/artifact/artifact.properties > dit-version"
+                    }
+                    sh "cat dit-version | sed 's/DIT_PARAMETER_VERSION = //' > DIT_VERSION"
+                    def DIT_VERSION = readFile('DIT_VERSION')
+                    env.DIT_VERSION = DIT_VERSION.trim()
+                    echo "${env.DIT_VERSION}"
+                    if (env.DIT_VERSION == "" ) {
+                         echo "Pipeline fails due to DIT version is empty"
+                         sh "exit 1"
+                    }
+              }
+           }
+       }
+       stage("Posting DIT details to CI Portal"){
+           steps{
+               script{
+                   sh '''
+                       curl --location --request POST https://ci-portal.seli.wh.rnd.internal.ericsson.com/api/cloudNative/postDeploymentUtilities/${PRODUCT_SET}/ --data '{"DIT": "'\${DIT_VERSION}'"}'
+                      '''
+               }
+           }
+       }
+        stage('Generate Parameters') {
+            steps {
+                script {
+                            sh 'echo "bro_chart_version=${BRO_CHART_VERSION}" > artifact.properties'
+                            sh 'echo "pre_deploy_chart_version=${PRE_DEPLOY_CHART_VERSION}" >> artifact.properties'
+                            sh 'echo "infra_chart_version=${INFRA_CHART_VERSION}" >> artifact.properties'
+                            sh 'echo "stateless_chart_version=${STATELESS_CHART_VERSION}" >> artifact.properties'
+                            sh 'echo "monitoring_chart_version=${MONITORING_CHART_VERSION}" >> artifact.properties'
+                            sh 'echo "integration_value_version=${INTEGRATION_VALUE_VERSION}" >> artifact.properties'
+                            sh 'echo "enm_iso_version=${ISO_VERSION}" >> artifact.properties'
+                            sh 'echo "product_set_version=${PRODUCT_SET}" >> artifact.properties'
+                            sh 'echo "SPRINT_TAG=${SPRINT_TAG}" >> artifact.properties'
+                            archiveArtifacts 'artifact.properties'
+                            currentBuild.displayName = "PRODUCT SET ON: ${PRODUCT_SET}"
+                }
+            }
+        }
+    }
+    post {
+        success {
+            script {
+                sh(script: 'wget -q -O - --no-check-certificate --post-data="" https://ci-portal.seli.wh.rnd.internal.ericsson.com/api/manageCNProductSet/\${PRODUCT_SET}/cENM-Build-Integration-Charts/passed/', returnStdout: true).trim()
+                currentBuild.rawBuild.@result = hudson.model.Result.SUCCESS
+            }
+        }
+        failure {
+            script {
+                sh(script: 'wget -q -O - --no-check-certificate --post-data="" https://ci-portal.seli.wh.rnd.internal.ericsson.com/api/manageCNProductSet/\${PRODUCT_SET}/cENM-Build-Integration-Charts/failed/', returnStdout: true).trim()
+                currentBuild.rawBuild.@result = hudson.model.Result.FAILURE
+            }
+        }
+    }
+}
+
+
+// More about @Builder: http://mrhaki.blogspot.com/2014/05/groovy-goodness-use-builder-ast.html
+import groovy.transform.builder.Builder
+import groovy.transform.builder.SimpleStrategy
+@Builder(builderStrategy = SimpleStrategy, prefix = '')
+class BobCommand {
+    def bobImage = 'bob.2.0:latest'
+    def envVars = [:]
+    def needDockerSocket = false
+
+    String toString() {
+        def env = envVars
+                .collect({ entry -> "-e ${entry.key}=\"${entry.value}\"" })
+                .join(' ')
+
+        def cmd = """\
+            |docker run
+            |--init
+            |--rm
+            |--workdir \${PWD}
+            |--user \$(id -u):\$(id -g)
+            |-v \${PWD}:\${PWD}
+            |-v /etc/group:/etc/group:ro
+            |-v /etc/passwd:/etc/passwd:ro
+            |-v \${HOME}/.m2:\${HOME}/.m2
+            |-v \${HOME}/.docker:\${HOME}/.docker
+            |${needDockerSocket ? '-v /var/run/docker.sock:/var/run/docker.sock' : ''}
+            |${env}
+            |\$(for group in \$(id -G); do printf ' --group-add %s' "\$group"; done)
+            |--group-add \$(stat -c '%g' /var/run/docker.sock)
+            |${bobImage}
+            |"""
+        return cmd
+                .stripMargin()           // remove indentation
+                .replace('\n', ' ')      // join lines
+                .replaceAll(/[ ]+/, ' ') // replace multiple spaces by one
+    }
+}
+def generate_metadata_filesize() {
+             //generate utility_tgz_filesize
+             sh 'curl -4 https://arm.seli.gic.ericsson.se/artifactory/proj-enm-dev-internal-helm/utilities/${DOCKER_IMAGE_NAME}/${DOCKER_IMAGE_VERSION}/${DOCKER_IMAGE_NAME}-${DOCKER_IMAGE_VERSION}.tgz -o utilities/${DOCKER_IMAGE_NAME}-${DOCKER_IMAGE_VERSION}.tgz'
+             env.UTILITY_TGZ_FILE_SIZE = sh(script: "du -b utilities/${DOCKER_IMAGE_NAME}-${DOCKER_IMAGE_VERSION}.tgz | cut -f1", returnStdout: true).trim()
+             // generate utilities metadata parameters
+             sh "${bob} generate-utilities-int-metadata-parameters"
+             archiveArtifacts "${UTILITY_METADATA_FILE_NAME}"
+}

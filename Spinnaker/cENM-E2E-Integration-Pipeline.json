@@ -1,0 +1,191 @@
+{
+  "appConfig": {},
+  "description": "",
+  "disabled": false,
+  "keepWaitingPipelines": true,
+  "lastModifiedBy": "enaggop",
+  "limitConcurrent": true,
+  "notifications": [
+    {
+      "address": "peddinti.tarakesam@tcs.com",
+      "level": "pipeline",
+      "type": "email",
+      "when": [
+        "pipeline.complete",
+        "pipeline.failed"
+      ]
+    }
+  ],
+  "parameterConfig": [
+    {
+      "default": "${trigger.properties['ISO_VERSION'] ?: ''}",
+      "description": "",
+      "hasOptions": false,
+      "label": "",
+      "name": "ISO_VERSION",
+      "options": [
+        {
+          "value": ""
+        }
+      ],
+      "pinned": false,
+      "required": false
+    }
+  ],
+  "stages": [
+    {
+      "continuePipeline": false,
+      "failPipeline": true,
+      "job": "infra-integration",
+      "master": "oss-fem16s11-eiffel004",
+      "name": "Build-Infra-Integration-Chart",
+      "parameters": {
+        "ISO_VERSION": "${parameters['ISO_VERSION']}"
+      },
+      "propertyFile": "artifact.properties",
+      "refId": "6",
+      "requisiteStageRefIds": [],
+      "type": "jenkins"
+    },
+    {
+      "completeOtherBranchesThenFail": true,
+      "continuePipeline": false,
+      "failPipeline": false,
+      "job": "cENM_Install_ENM32",
+      "master": "oss-fem16s11-eiffel004",
+      "name": "cENM_Install_Integration_Test",
+      "overrideTimeout": true,
+      "parameters": {
+        "BRO_CHART_VERSION": "${#stage('Build-enm-int-chart-version-job')['context']['BRO_CHART_VERSION']}",
+        "INFRA_CHART_VERSION": "${#stage('Build-Infra-Integration-Chart')['context']['INT_CHART_VERSION']}",
+        "INTEGRATION_VALUE_VERSION": "${#stage('Build-enm-int-chart-version-job')['context']['INTEGRATION_VALUE_VERSION']}",
+        "PRE_DEPLOY_CHART_VERSION": "${#stage('Build-enm-int-chart-version-job')['context']['PRE_DEPLOY_CHART_VERSION']}",
+        "STATELESS_CHART_VERSION": "${#stage('Build-stateless-integration-Chart')['context']['INT_CHART_VERSION']}"
+      },
+      "refId": "10",
+      "requisiteStageRefIds": [
+        "6",
+        "16",
+        "18"
+      ],
+      "stageTimeoutMs": 21600000,
+      "type": "jenkins"
+    },
+    {
+      "completeOtherBranchesThenFail": true,
+      "continuePipeline": false,
+      "failPipeline": false,
+      "job": "eric-enm-csar-package",
+      "master": "oss-fem16s11-eiffel004",
+      "name": "CSAR PACKAGE",
+      "overrideTimeout": true,
+      "parameters": {
+        "BRO_CHART_VERSION": "${#stage('Build-enm-int-chart-version-job')['context']['BRO_CHART_VERSION']}",
+        "INFRA_CHART_VERSION": "${#stage('Build-Infra-Integration-Chart')['context']['INT_CHART_VERSION']}",
+        "INTEGRATION_VALUE_VERSION": "${#stage('Build-enm-int-chart-version-job')['context']['INTEGRATION_VALUE_VERSION']}",
+        "JENKINS_URL_INTEGRATION": "https://fem16s11-eiffel004.eiffel.gic.ericsson.se:8443",
+        "PRE_DEPLOY_CHART_VERSION": "${#stage('Build-enm-int-chart-version-job')['context']['PRE_DEPLOY_CHART_VERSION']}",
+        "STATELESS_CHART_VERSION": "${#stage('Build-stateless-integration-Chart')['context']['INT_CHART_VERSION']}"
+      },
+      "propertyFile": "artifact.properties",
+      "refId": "13",
+      "requisiteStageRefIds": [
+        "6",
+        "16",
+        "18"
+      ],
+      "stageTimeoutMs": 21600000,
+      "type": "jenkins"
+    },
+    {
+      "continuePipeline": false,
+      "failPipeline": true,
+      "job": "monitoring-integration",
+      "master": "oss-fem16s11-eiffel004",
+      "name": "Build-monitoring-Integration-Chart",
+      "parameters": {
+        "ISO_VERSION": "${parameters['ISO_VERSION']}"
+      },
+      "propertyFile": "artifact.properties",
+      "refId": "14",
+      "requisiteStageRefIds": [],
+      "type": "jenkins"
+    },
+    {
+      "completeOtherBranchesThenFail": true,
+      "continuePipeline": false,
+      "failPipeline": false,
+      "job": "Monitoring-Install-ENM101",
+      "master": "oss-fem16s11-eiffel004",
+      "name": "Monitoring-install-enm101",
+      "overrideTimeout": true,
+      "parameters": {
+        "MONITORING_CHART_VERSION": "${#stage('Build-monitoring-Integration-Chart')['context']['INT_CHART_VERSION']}"
+      },
+      "refId": "15",
+      "requisiteStageRefIds": [
+        "14"
+      ],
+      "stageTimeoutMs": 21600000,
+      "type": "jenkins"
+    },
+    {
+      "continuePipeline": false,
+      "failPipeline": true,
+      "job": "stateless-integration",
+      "master": "oss-fem16s11-eiffel004",
+      "name": "Build-stateless-integration-Chart",
+      "parameters": {
+        "ISO_VERSION": "${parameters['ISO_VERSION']}"
+      },
+      "propertyFile": "artifact.properties",
+      "refId": "16",
+      "requisiteStageRefIds": [],
+      "type": "jenkins"
+    },
+    {
+      "completeOtherBranchesThenFail": true,
+      "continuePipeline": false,
+      "failPipeline": false,
+      "job": "cENM_Install_Openstack_ENM101",
+      "master": "oss-fem16s11-eiffel004",
+      "name": "CSAR UNPACKAGE and  INSTALL",
+      "parameters": {
+        "BRO_CHART_VERSION": "${#stage('Build-enm-int-chart-version-job')['context']['BRO_CHART_VERSION']}",
+        "CSAR_PACKAGE_VERSION": "${#stage('CSAR PACKAGE')['context']['CSAR_PACKAGE_VERSION']}",
+        "INFRA_CHART_VERSION": "${#stage('CSAR PACKAGE')['context']['INFRA_CHART_VERSION']}",
+        "INTEGRATION_VALUE_VERSION": "${#stage('CSAR PACKAGE')['context']['INTEGRATION_VALUE_VERSION']}",
+        "PRE_DEPLOY_CHART_VERSION": "${#stage('Build-enm-int-chart-version-job')['context']['PRE_DEPLOY_CHART_VERSION']}",
+        "STATELESS_CHART_VERSION": "${#stage('CSAR PACKAGE')['context']['STATELESS_CHART_VERSION']}"
+      },
+      "refId": "17",
+      "requisiteStageRefIds": [
+        "13"
+      ],
+      "stageTimeoutMs": 25200000,
+      "type": "jenkins"
+    },
+    {
+      "continuePipeline": false,
+      "failPipeline": true,
+      "job": "enm-int-chart-versions",
+      "master": "oss-fem16s11-eiffel004",
+      "name": "Build-enm-int-chart-version-job",
+      "parameters": {},
+      "propertyFile": "artifact.properties",
+      "refId": "18",
+      "requisiteStageRefIds": [],
+      "type": "jenkins"
+    }
+  ],
+  "triggers": [
+    {
+      "enabled": true,
+      "job": "eric-enm-e2e-build",
+      "master": "oss-fem16s11-eiffel004",
+      "propertyFile": "artifact.properties",
+      "type": "jenkins"
+    }
+  ],
+  "updateTs": "1590872589971"
+}

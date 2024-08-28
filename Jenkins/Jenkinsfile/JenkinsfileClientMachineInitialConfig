@@ -1,0 +1,170 @@
+pipeline{
+    agent {
+        node{
+            label slave
+        }
+    }
+    environment {
+        HOME_DIR = "${WORKSPACE}"
+        Client_HOME = "/home/cenmbuild"
+        cenm_utilities_docker_image = "armdocker.rnd.ericsson.se/proj-enm/cenm-build-utilities:latest"
+        client_machine_password = "Lxszgui71aPyTO2p3A5C"
+    }
+    stages{
+        stage('Clean Up WorkSpace'){
+            steps{
+                deleteDir()
+            }
+        }
+        stage('Checkout Integration Pipeline Git Repository') {
+            steps {
+                git branch: 'master',
+                        url: '${GERRIT_MIRROR}/OSS/com.ericsson.oss.containerisation/eric-enm-integration-pipeline-code'
+                sh '''
+                    git remote set-url origin --push ${GERRIT_CENTRAL}/OSS/com.ericsson.oss.containerisation/eric-enm-integration-pipeline-code
+                '''
+            }
+        }
+        stage('Load common methods') {
+            steps {
+                script {
+                    commonMethods = load("${env.WORKSPACE}/Jenkins/JobDSL/CommonMethods.groovy")
+                }
+            }
+        }
+        stage('Delete docker image') {
+            steps {
+                script {
+                    commonMethods.delete_build_utilities_image()
+                }
+            }
+        }
+        stage('Pull docker image') {
+            steps {
+                script {
+                    sh "docker pull ${cenm_utilities_docker_image}"
+                }
+            }
+        }
+        stage( 'Pre Configurations' ) {
+            steps {
+                script{
+                    commonMethods.extract_jq()
+                    commonMethods.client_machine_initial_config_param_from_dit()
+               }
+            }
+        }
+        stage('Checking client machine type and user in DIT'){
+            steps{
+                script{
+                    if ( CLIENT_MACHINE_TYPE  == 'client_machine' && CLIENT_MACHINE_USERNAME == 'cenmbuild'){
+                        echo "${environment_name} has a ${CLIENT_MACHINE_TYPE} ${CLIENT_MACHINE_IP_ADDRESS} with user ${CLIENT_MACHINE_USERNAME}"
+                    } else {
+                        echo "Cannot continue as ${environment_name} do not have a client machine or client machine is not properly configured in DIT"
+                        echo "Exiting the job"
+                        sh "exit 1"
+                    }
+                }
+            }
+        }
+        stage('Passwordless connection'){
+            steps{
+                script{
+                    exit_code = sh(script: "ssh ${CLIENT_MACHINE_USERNAME}@${CLIENT_MACHINE_IP_ADDRESS} 'echo'", returnStatus: true)
+                    if (exit_code != 0){
+                        echo "Recieved exit code $exit_code"
+                        echo "Passwordless connection is not established. Copying lciadm100 user public key to client machine"
+                        sh "docker run --rm -v /home/lciadm100/.ssh/id_rsa.pub:/root/.ssh/id_rsa.pub -v /root:/root --workdir ${WORKSPACE} ${cenm_utilities_docker_image} sshpass -p ${client_machine_password} ssh-copy-id ${CLIENT_MACHINE_USERNAME}@${CLIENT_MACHINE_IP_ADDRESS}"
+                    } else {
+                        echo "Recieved exit code $exit_code"
+                        echo "Passwordless connection is available i.e Slave is able to connect to Client machine"
+                    }
+                }
+            }
+        }
+        stage( 'Checking disk space in client machine' ) {
+            steps {
+                script{
+                    allocated_space = sh ( script: "ssh -o LogLevel=error -o 'StrictHostKeyChecking no' ${CLIENT_MACHINE_USERNAME}@${CLIENT_MACHINE_IP_ADDRESS} 'df -kh ${Client_HOME} |awk \"NR==2 { print \\\$2 }\"|sed \"s/G//\"'", returnStdout: true ).trim()
+                    min_required_space = "150"
+                    if( allocated_space.toDouble() > min_required_space.toDouble()){
+                        echo "${Client_HOME} is having ${allocated_space}G of space allocated in client machine"
+                    }else {
+                        echo "${Client_HOME} is not having enough allocated space as per client machine template. Allocated space = ${allocated_space}G"
+                        echo "Exiting the job"
+                        sh "exit 1"
+                    }
+                }
+            }
+        }
+        stage( 'Checking cenmbuild user in docker group' ) {
+            steps {
+                script{
+                    docker_group = sh ( script: "ssh -o 'LogLevel=error' -o 'StrictHostKeyChecking no' ${CLIENT_MACHINE_USERNAME}@${CLIENT_MACHINE_IP_ADDRESS} 'cat /etc/group|grep docker'", returnStdout: true ).trim()
+                    if ( docker_group.contains("cenmbuild") ){
+                        echo "Client machine's cenmbuild user is a part of docker group"
+                    } else {
+                        echo "Client machine's cenmbuild user is not a part of docker group"
+                        echo "Exiting the job"
+                        sh "exit 1"
+                    }
+                }
+            }
+        }
+        stage('Creating daemon.json file'){
+            steps{
+                script{
+                    sh "echo '{\"insecure-registries\" : [\"${TARGET_DOCKER_REGISTRY_URL}\"], \"data-root\": \"/docker\"}'>daemon.json"
+                    echo "Copying daemon.json file to client machine"
+                    sh "ssh -o 'LogLevel=error' -o 'StrictHostKeyChecking no' ${CLIENT_MACHINE_USERNAME}@${CLIENT_MACHINE_IP_ADDRESS} 'sudo chmod 777 /etc/docker/'"
+                    sh "ssh -o 'LogLevel=error' -o 'StrictHostKeyChecking no' ${CLIENT_MACHINE_USERNAME}@${CLIENT_MACHINE_IP_ADDRESS} 'rm -rf /etc/docker/daemon.json '"
+                    sh "scp -o 'LogLevel=error' -o 'StrictHostKeyChecking no' ${HOME_DIR}/daemon.json ${CLIENT_MACHINE_USERNAME}@${CLIENT_MACHINE_IP_ADDRESS}:/etc/docker"
+                    sh "ssh -o 'LogLevel=error' -o 'StrictHostKeyChecking no' ${CLIENT_MACHINE_USERNAME}@${CLIENT_MACHINE_IP_ADDRESS} 'sudo chown root:root /etc/docker/daemon.json '"
+                    sh "ssh -o 'LogLevel=error' -o 'StrictHostKeyChecking no' ${CLIENT_MACHINE_USERNAME}@${CLIENT_MACHINE_IP_ADDRESS} 'sudo chmod 644 /etc/docker/daemon.json '"
+                    sh "ssh -o 'LogLevel=error' -o 'StrictHostKeyChecking no' ${CLIENT_MACHINE_USERNAME}@${CLIENT_MACHINE_IP_ADDRESS} 'sudo chmod 755 /etc/docker/'"
+                    try{
+                        echo "Restarting Docker"
+                        sh "date"
+                        sh "ssh -o 'LogLevel=error' -o 'StrictHostKeyChecking no' ${CLIENT_MACHINE_USERNAME}@${CLIENT_MACHINE_IP_ADDRESS} 'sudo systemctl restart docker'"
+                    }
+                    catch(all){
+                        echo "Unable to restart docker"
+                    }
+                    sh "sleep 10s"
+                    try{
+                        echo "Checking Docker Status"
+                        sh "ssh -o 'LogLevel=error' -o 'StrictHostKeyChecking no' ${CLIENT_MACHINE_USERNAME}@${CLIENT_MACHINE_IP_ADDRESS} 'sudo systemctl status docker'"
+                    }
+                    catch(all){
+                        echo "Exiting the job due to docker issue"
+                        sh "exit 1"
+                    }
+                    echo "Checking Docker Login"
+                    sh "ssh -o 'LogLevel=error' -o 'StrictHostKeyChecking no' ${CLIENT_MACHINE_USERNAME}@${CLIENT_MACHINE_IP_ADDRESS} 'sudo docker login ${TARGET_DOCKER_REGISTRY_URL} --username=${CONTAINER_REGISTRY_USERNAME} --password=${CONTAINER_REGISTRY_PASSWORD}'"
+                }
+            }
+        }
+    }
+    post{
+        failure {
+            script{
+                echo "Failure"
+            }
+        }
+        aborted{
+            script{
+                echo "Aborted"
+            }
+        }
+        success{
+            script{
+                echo "Success"
+            }
+        }
+        always {
+            script{
+                currentBuild.displayName = "Configuration on ${CLIENT_MACHINE_IP_ADDRESS} of ${environment_name}"
+            }
+        }
+    }
+}

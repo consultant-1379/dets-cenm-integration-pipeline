@@ -1,0 +1,195 @@
+{
+  "keepWaitingPipelines": false,
+  "lastModifiedBy": "eseulea",
+  "limitConcurrent": true,
+  "notifications": [
+    {
+      "address": "paul.mcguinness@ericsson.com",
+      "level": "pipeline",
+      "type": "email",
+      "when": [
+        "pipeline.complete",
+        "pipeline.failed"
+      ]
+    }
+  ],
+  "parameterConfig": [
+    {
+      "default": "${trigger.properties['enm_iso_version'] ?: ''}",
+      "description": "",
+      "hasOptions": false,
+      "label": "",
+      "name": "enm_iso_version",
+      "options": [
+        {
+          "value": ""
+        }
+      ],
+      "pinned": false,
+      "required": false
+    },
+    {
+      "default": "${trigger.properties['product_set_version'] ?: ''}",
+      "description": "",
+      "hasOptions": false,
+      "label": "",
+      "name": "product_set_version",
+      "options": [
+        {
+          "value": ""
+        }
+      ],
+      "pinned": false,
+      "required": false
+    },
+    {
+      "default": "${trigger.properties['bro_chart_version'] ?: ''}",
+      "description": "",
+      "hasOptions": false,
+      "label": "",
+      "name": "bro_chart_version",
+      "options": [
+        {
+          "value": ""
+        }
+      ],
+      "pinned": false,
+      "required": false
+    },
+    {
+      "default": "${trigger.properties['pre_deploy_chart_version'] ?: ''}",
+      "description": "",
+      "hasOptions": false,
+      "label": "",
+      "name": "pre_deploy_chart_version",
+      "options": [
+        {
+          "value": ""
+        }
+      ],
+      "pinned": false,
+      "required": false
+    },
+    {
+      "default": "${trigger.properties['infra_chart_version'] ?: ''}",
+      "description": "",
+      "hasOptions": false,
+      "label": "",
+      "name": "infra_chart_version",
+      "options": [
+        {
+          "value": ""
+        }
+      ],
+      "pinned": false,
+      "required": false
+    },
+    {
+      "default": "${trigger.properties['stateless_chart_version'] ?: ''}",
+      "description": "",
+      "hasOptions": false,
+      "label": "",
+      "name": "stateless_chart_version",
+      "options": [
+        {
+          "value": ""
+        }
+      ],
+      "pinned": false,
+      "required": false
+    },
+    {
+      "default": "${trigger.properties['integration_value_version'] ?: ''}",
+      "description": "",
+      "hasOptions": false,
+      "label": "",
+      "name": "integration_value_version",
+      "options": [
+        {
+          "value": ""
+        }
+      ],
+      "pinned": false,
+      "required": false
+    },
+    {
+      "default": "${trigger.properties['monitoring_chart_version'] ?: ''}",
+      "description": "",
+      "hasOptions": false,
+      "label": "",
+      "name": "monitoring_chart_version",
+      "options": [
+        {
+          "value": ""
+        }
+      ],
+      "pinned": false,
+      "required": false
+    },
+    {
+      "default": "${trigger.properties['BRANCH'] ?: ''}",
+      "description": "",
+      "hasOptions": false,
+      "label": "",
+      "name": "BRANCH",
+      "options": [
+        {
+          "value": ""
+        }
+      ],
+      "pinned": false,
+      "required": false
+    }
+  ],
+  "spelEvaluator": "v4",
+  "stages": [
+    {
+      "continuePipeline": false,
+      "failPipeline": true,
+      "job": "eric-enm-csar-package-pointfix",
+      "master": "oss-fem16s11-eiffel004",
+      "name": "cENM CSAR BUILD PointFix",
+      "parameters": {
+        "BRANCH": "${parameters['BRANCH']}",
+        "BRO_CHART_VERSION": "${parameters['bro_chart_version']}",
+        "INFRA_CHART_VERSION": "${parameters['infra_chart_version']}",
+        "INTEGRATION_VALUE_VERSION": "${parameters['integration_value_version']}",
+        "ISO_VERSION": "${parameters['enm_iso_version']}",
+        "MONITORING_CHART_VERSION": "${parameters['monitoring_chart_version']}",
+        "PRE_DEPLOY_CHART_VERSION": "${parameters['pre_deploy_chart_version']}",
+        "PRODUCT_SET": "${parameters['product_set_version']}",
+        "STATELESS_CHART_VERSION": "${parameters['stateless_chart_version']}"
+      },
+      "propertyFile": "artifact.properties",
+      "refId": "1",
+      "requisiteStageRefIds": [],
+      "stageTimeoutMs": 10800000,
+      "type": "jenkins"
+    },
+    {
+      "continuePipeline": false,
+      "failPipeline": true,
+      "job": "eric-enm-csar-sync-pointfix",
+      "master": "oss-fem16s11-eiffel004",
+      "name": "cENM CSAR SYNC PointFix",
+      "parameters": {
+        "CSAR_PACKAGE_VERSION": "${#stage('cENM CSAR BUILD PointFix')['context']['CSAR_PACKAGE_VERSION']}"
+      },
+      "refId": "2",
+      "requisiteStageRefIds": [
+        "1"
+      ],
+      "type": "jenkins"
+    }
+  ],
+  "triggers": [
+    {
+      "enabled": true,
+      "job": "eric-enm-int-sync-pointfix",
+      "master": "oss-fem16s11-eiffel004",
+      "propertyFile": "artifact.properties",
+      "type": "jenkins"
+    }
+  ],
+  "updateTs": "1617704784710"
+}

@@ -1,0 +1,236 @@
+{
+  "disabled": false,
+  "expectedArtifacts": [],
+  "keepWaitingPipelines": false,
+  "lastModifiedBy": "eandurs",
+  "limitConcurrent": true,
+  "parameterConfig": [
+    {
+      "default": "${trigger.properties['infra_chart_version'] ?: ''}",
+      "description": "",
+      "hasOptions": false,
+      "label": "",
+      "name": "INFRA_CHART_VERSION",
+      "options": [
+        {
+          "value": ""
+        }
+      ],
+      "pinned": false,
+      "required": false
+    },
+    {
+      "default": "${trigger.properties['stateless_chart_version'] ?: ''}",
+      "description": "",
+      "hasOptions": false,
+      "label": "",
+      "name": "STATELESS_CHART_VERSION",
+      "options": [
+        {
+          "value": "${trigger.properties['stateless_chart_version'] ?: ''}"
+        },
+        {
+          "value": ""
+        }
+      ],
+      "pinned": false,
+      "required": false
+    },
+    {
+      "default": "${trigger.properties['bro_chart_version'] ?: ''}",
+      "description": "",
+      "hasOptions": false,
+      "label": "",
+      "name": "BRO_CHART_VERSION",
+      "options": [
+        {
+          "value": "${trigger.properties['bro_chart_version'] ?: ''}"
+        },
+        {
+          "value": ""
+        }
+      ],
+      "pinned": false,
+      "required": false
+    },
+    {
+      "default": "${trigger.properties['pre_deploy_chart_version'] ?: ''}",
+      "description": "",
+      "hasOptions": false,
+      "label": "",
+      "name": "PRE_DEPLOY_CHART_VERSION",
+      "options": [
+        {
+          "value": "${trigger.properties['pre_deploy_chart_version'] ?: ''}"
+        },
+        {
+          "value": ""
+        }
+      ],
+      "pinned": false,
+      "required": false
+    },
+    {
+      "default": "${trigger.properties['integration_value_version'] ?: ''}",
+      "description": "",
+      "hasOptions": false,
+      "label": "",
+      "name": "INTEGRATION_VALUE_VERSION",
+      "options": [
+        {
+          "value": ""
+        }
+      ],
+      "pinned": false,
+      "required": false
+    },
+    {
+      "default": "${trigger.properties['product_set_version'] ?: ''}",
+      "description": "",
+      "hasOptions": false,
+      "label": "",
+      "name": "PRODUCT_SET_VERSION",
+      "options": [
+        {
+          "value": ""
+        }
+      ],
+      "pinned": false,
+      "required": false
+    },
+    {
+      "default": "${trigger.properties['monitoring_chart_version'] ?: ''}",
+      "description": "",
+      "hasOptions": false,
+      "label": "",
+      "name": "MONITORING_CHART_VERSION",
+      "options": [
+        {
+          "value": ""
+        }
+      ],
+      "pinned": false,
+      "required": false
+    }
+  ],
+  "stages": [
+    {
+      "completeOtherBranchesThenFail": true,
+      "continuePipeline": false,
+      "failPipeline": false,
+      "job": "eric-enm-bro-integration",
+      "master": "oss-fem16s11-eiffel004",
+      "name": "Publish_bro_integration_chart",
+      "parameters": {
+        "INTEGRATION_CHART_VERSION": "${parameters['BRO_CHART_VERSION']}",
+        "PRODUCT_SET_VERSION": "${parameters['PRODUCT_SET_VERSION']}"
+      },
+      "propertyFile": "",
+      "refId": "2",
+      "requisiteStageRefIds": [],
+      "type": "jenkins"
+    },
+    {
+      "completeOtherBranchesThenFail": true,
+      "continuePipeline": false,
+      "failPipeline": false,
+      "job": "eric-enm-pre-deploy-integration",
+      "master": "oss-fem16s11-eiffel004",
+      "name": "Publish_pre-deploy_integration_chart",
+      "parameters": {
+        "INTEGRATION_CHART_VERSION": "${parameters['PRE_DEPLOY_CHART_VERSION']}",
+        "PRODUCT_SET_VERSION": "${parameters['PRODUCT_SET_VERSION']}"
+      },
+      "refId": "3",
+      "requisiteStageRefIds": [],
+      "type": "jenkins"
+    },
+    {
+      "completeOtherBranchesThenFail": true,
+      "continuePipeline": false,
+      "failPipeline": false,
+      "job": "eric-enm-infra-integration",
+      "master": "oss-fem16s11-eiffel004",
+      "name": "Publish_infra_integration_chart",
+      "parameters": {
+        "INTEGRATION_CHART_VERSION": "${parameters['INFRA_CHART_VERSION']}",
+        "PRODUCT_SET_VERSION": "${parameters['PRODUCT_SET_VERSION']}"
+      },
+      "refId": "4",
+      "requisiteStageRefIds": [],
+      "type": "jenkins"
+    },
+    {
+      "completeOtherBranchesThenFail": true,
+      "continuePipeline": false,
+      "failPipeline": false,
+      "job": "eric-enm-stateless-integration",
+      "master": "oss-fem16s11-eiffel004",
+      "name": "Publish_Stateless_integration_chart",
+      "parameters": {
+        "INTEGRATION_CHART_VERSION": "${parameters['STATELESS_CHART_VERSION']}",
+        "PRODUCT_SET_VERSION": "${parameters['PRODUCT_SET_VERSION']}"
+      },
+      "refId": "5",
+      "requisiteStageRefIds": [],
+      "type": "jenkins"
+    },
+    {
+      "completeOtherBranchesThenFail": true,
+      "continuePipeline": false,
+      "failPipeline": false,
+      "job": "eric-enm-integration-values-release",
+      "master": "oss-fem16s11-eiffel004",
+      "name": "Publish_Integration_value_files",
+      "parameters": {
+        "INTEGRATION_VALUE_VERSION": "${parameters['INTEGRATION_VALUE_VERSION']}",
+        "PRODUCT_SET_VERSION": "${parameters['PRODUCT_SET_VERSION']}"
+      },
+      "refId": "6",
+      "requisiteStageRefIds": [],
+      "type": "jenkins"
+    },
+    {
+      "completeOtherBranchesThenFail": true,
+      "continuePipeline": false,
+      "failPipeline": false,
+      "job": "eric-enm-monitoring-integration",
+      "master": "oss-fem16s11-eiffel004",
+      "name": "Publish_monitoring_integration_chart",
+      "parameters": {
+        "INTEGRATION_CHART_VERSION": "${parameters['MONITORING_CHART_VERSION']}",
+        "PRODUCT_SET_VERSION": "${parameters['PRODUCT_SET_VERSION']}"
+      },
+      "propertyFile": "",
+      "refId": "7",
+      "requisiteStageRefIds": [],
+      "type": "jenkins"
+    },
+    {
+      "completeOtherBranchesThenFail": false,
+      "continuePipeline": true,
+      "failPipeline": false,
+      "job": "rcd_add_product_set",
+      "markUnstableAsSuccessful": true,
+      "master": "oss-fem16s11-eiffel004",
+      "name": "publish_rcd_product_set",
+      "parameters": {
+        "product_set": "${parameters['PRODUCT_SET_VERSION']}"
+      },
+      "refId": "8",
+      "requisiteStageRefIds": [],
+      "type": "jenkins"
+    }
+  ],
+  "triggers": [
+    {
+      "description": "(Jenkins) oss-aispinn-fem170-eiffel004: eric-enm-int-sync",
+      "enabled": false,
+      "job": "eric-enm-int-sync",
+      "master": "oss-fem16s11-eiffel004",
+      "propertyFile": "artifact.properties",
+      "type": "jenkins"
+    }
+  ],
+  "updateTs": "1643193039968"
+}
